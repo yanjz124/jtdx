@@ -299,6 +299,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_answerWorkedB4 {false},
   m_singleshot {false},
   m_passiveMode {false},
+  m_passiveTxUserDisabled {false},
   m_webServerProcess {nullptr},
   m_autofilter {false},
   m_houndMode {false},
@@ -2230,6 +2231,8 @@ void MainWindow::on_enableTxButton_clicked (bool checked)
   if(m_enableTx && !checked && m_curMsgTx.startsWith(m_hisCall+" ")) m_lasthint=true;
   if(checked && m_lasthint) m_lasthint=false;
   m_enableTx = checked;
+  // Track user intent for passive mode auto-re-enable
+  if (m_passiveMode) m_passiveTxUserDisabled = !checked;
   statusUpdate ();
   if(m_mode.left(4)=="WSPR")  {
     QPalette palette {ui->sbTxPercent->palette ()};
@@ -4770,8 +4773,8 @@ void MainWindow::guiUpdate()
         && m_idleMinutes >= m_config.watchdog () && !m_passiveMode) {
       txwatchdog (true);       // switch off Enable Tx button
     }
-    // Passive mode: keep Enable TX armed at all times
-    if (m_passiveMode && !m_enableTx && !m_tune) {
+    // Passive mode: re-enable TX if it was disabled by system (not by user click)
+    if (m_passiveMode && !m_enableTx && !m_tune && !m_passiveTxUserDisabled) {
       enableTx_mode(true);
       txwatchdog(false);  // reset watchdog
       if(m_config.write_decoded_debug())
