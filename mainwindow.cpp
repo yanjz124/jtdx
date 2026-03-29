@@ -4770,6 +4770,13 @@ void MainWindow::guiUpdate()
         && m_idleMinutes >= m_config.watchdog () && !m_passiveMode) {
       txwatchdog (true);       // switch off Enable Tx button
     }
+    // Passive mode: keep Enable TX armed at all times
+    if (m_passiveMode && !m_enableTx && !m_tune) {
+      enableTx_mode(true);
+      txwatchdog(false);  // reset watchdog
+      if(m_config.write_decoded_debug())
+        writeToALLTXT("Passive mode: re-enabled Enable TX");
+    }
     if(m_tune && m_config.tunetimer() && !m_tuneup) { //shall not count at WSPR band hopping
       QString remtime;
       remtime = QString::asprintf("%.0f s",StopTuneTimer.remainingTime()/1000.0);
