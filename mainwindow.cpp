@@ -3614,15 +3614,17 @@ void MainWindow::process_Auto()
       ui->TxFreqSpinBox->setValue (rx);
       }
       if (!rpt.isEmpty () && rpt == m_rpt) m_rpt = "-60";
-    } else  if (m_transmittedQSOProgress != CALLING){
-        if (m_passiveMode) {
-          // Passive mode: don't call CQ, just keep monitoring
+    } else if (m_passiveMode) {
+        // Passive mode: never call CQ, halt if already calling CQ
+        if (m_transmittedQSOProgress == CALLING && (m_enableTx || m_transmitting)) {
+          m_bTxTime = false;
+          m_txNext = false;
           if(m_config.write_decoded_debug())
-            writeToALLTXT("Passive mode: no CQ to answer, staying in monitor mode");
-        } else {
-          on_txb6_clicked();
-          if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx6->text());
+            writeToALLTXT("Passive mode: halting CQ, returning to monitor");
         }
+    } else if (m_transmittedQSOProgress != CALLING) {
+        on_txb6_clicked();
+        if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx6->text());
     }
   }
 //  printf("%s(%0.1f) process_Auto: %s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",m_jtdxtime->currentDateTimeUtc2().toString("hh:mm:ss.zzz").toStdString().c_str(),m_jtdxtime->GetOffset(),m_hisCall.toStdString().c_str(),hisCall.toStdString().c_str(),m_lastloggedcall.toStdString().c_str(),mode.toStdString().c_str(),m_status,prio,ui->TxFreqSpinBox->value (),m_used_freq,m_callMode,m_callPrioCQ,m_reply_other,m_reply_me,counters2);
