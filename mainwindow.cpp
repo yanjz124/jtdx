@@ -3546,19 +3546,20 @@ void MainWindow::process_Auto()
             if(m_config.write_decoded_debug())
               writeToALLTXT("Passive mode: " + hisCall + " never answered us, cooldown 5min");
           }
-        clearDX (" cleared, RCQ/SCALL/SREPORT count reached");
-        if (m_reply_other)
-            counters2 = false;
-        else {
-            m_counter = m_config.nAnswerCQCounter();
-            m_qsoHistory.calllist(hisCall,rpt.toInt(),time);
+          clearDX (" cleared, RCQ/SCALL/SREPORT count reached");
+          if (m_reply_other)
+              counters2 = false;
+          else {
+              m_counter = m_config.nAnswerCQCounter();
+              m_qsoHistory.calllist(hisCall,rpt.toInt(),time);
+          }
+          count = m_qsoHistory.reset_count(hisCall);
+          hisCall = m_hisCall;
+          grid = m_hisGrid;
+          m_status = QsoHistory::NONE;
+          if (m_singleshot)
+            counters = false;
         }
-        count = m_qsoHistory.reset_count(hisCall);
-        hisCall = m_hisCall;
-        grid = m_hisGrid;
-        m_status = QsoHistory::NONE;
-        if (m_singleshot)
-          counters = false;
       }
     } else if ((m_status == QsoHistory::RCALL || (m_status == QsoHistory::SREPORT && !m_skipTx1)) && m_config.answerInCallCount() && 
         (m_config.nAnswerInCallCounter() <= count || m_reply_other)) {
