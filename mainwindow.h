@@ -341,6 +341,7 @@ private slots:
   void remove_child_from_event_filter (QObject *);
   void txwatchdog (bool triggered);
   void update_watchdog_label ();
+  void update_autoseq_status (QString const& status);
   void on_cbMenus_toggled(bool b);
   void on_cbShowWanted_toggled(bool b);
   void on_cbShowSpot_toggled(bool b);
@@ -627,6 +628,7 @@ private:
 
   // labels in status bar
   QLabel * tx_status_label;
+  QLabel * autoseq_status_label;
   QLabel * mode_label;
   QLabel * last_tx_label;
   QLabel * txwatchdog_label;

@@ -346,6 +346,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_QSOProgress {CALLING},
   m_transmittedQSOProgress {CALLING},
   tx_status_label {new QLabel {"Receiving"}},
+  autoseq_status_label {new QLabel {""}},
   mode_label {new QLabel {""}},
   last_tx_label {new QLabel {""}},
   txwatchdog_label {new QLabel {""}},
@@ -2643,6 +2644,14 @@ void MainWindow::createStatusBar()                           //createStatusBar
   tx_status_label->setFrameStyle(QFrame::Panel | QFrame::Sunken);
   statusBar()->addWidget(tx_status_label);
 
+  autoseq_status_label->setAlignment(Qt::AlignLeft);
+  autoseq_status_label->setAlignment(Qt::AlignVCenter);
+  autoseq_status_label->setContentsMargins(3,1,3,1);
+  autoseq_status_label->setMinimumSize(QSize(200,20));
+  autoseq_status_label->setFrameStyle(QFrame::Panel | QFrame::Sunken);
+  autoseq_status_label->setStyleSheet(QString("QLabel{background: %1; color: %2}").arg(Radio::convert_dark("#f0f0f0",m_useDarkStyle),Radio::convert_dark("#333333",m_useDarkStyle)));
+  statusBar()->addWidget(autoseq_status_label);
+
   mode_label->setAlignment(Qt::AlignHCenter);
   mode_label->setAlignment(Qt::AlignVCenter);
   mode_label->setContentsMargins(1,1,1,1);
@@ -3496,7 +3505,8 @@ void MainWindow::process_Auto()
         ((prio > 4 && prio < 17) || prio < 2 || m_strictdirCQ) && (m_config.nAnswerCQCounter() <= count || m_reply_other)) {
       if (m_passiveMode && m_reply_other && count < m_config.nAnswerCQCounter() + 4) {
         // Passive mode: station is busy answering others, keep trying longer
-        // They might get to us after their current QSO
+        int maxRetries = m_config.nAnswerCQCounter() + 4;
+        update_autoseq_status(tr("%1 busy, retry %2/%3").arg(hisCall).arg(count).arg(maxRetries));
         if(m_config.write_decoded_debug())
           writeToALLTXT("Passive mode: " + hisCall + " busy with other station, extending retry (" + QString::number(count) + ")");
       } else {
@@ -3504,11 +3514,13 @@ void MainWindow::process_Auto()
         if (m_passiveMode && !m_reply_other) {
           // Passive mode: station keeps CQing and ignoring us, put on 3-minute cooldown
           m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
+          update_autoseq_status(tr("%1 no reply, cooldown 3m").arg(hisCall));
           if(m_config.write_decoded_debug())
             writeToALLTXT("Passive mode: " + hisCall + " not responding, cooldown 3min");
         } else if (m_passiveMode) {
           // Passive mode: station answered others too many times, longer cooldown
           m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 300000);
+          update_autoseq_status(tr("%1 no reply, cooldown 5m").arg(hisCall));
           if(m_config.write_decoded_debug())
             writeToALLTXT("Passive mode: " + hisCall + " never answered us, cooldown 5min");
         }
@@ -3614,6 +3626,8 @@ void MainWindow::process_Auto()
       ui->TxFreqSpinBox->setValue (rx);
       }
       if (!rpt.isEmpty () && rpt == m_rpt) m_rpt = "-60";
+      // Update status with what we're about to do
+      update_autoseq_status(tr("Answering %1 (%2)").arg(hisCall).arg(count > 0 ? QString::number(count) : "new"));
     } else if (m_passiveMode) {
         // Passive mode: never call CQ, halt if already calling CQ
         if (m_transmittedQSOProgress == CALLING && (m_enableTx || m_transmitting)) {
@@ -3621,6 +3635,24 @@ void MainWindow::process_Auto()
           m_txNext = false;
           if(m_config.write_decoded_debug())
             writeToALLTXT("Passive mode: halting CQ, returning to monitor");
+        }
+        // Show cooldown info if any stations are cooling down
+        if (!m_passiveCooldown.isEmpty()) {
+          auto now = m_jtdxtime->currentMSecsSinceEpoch2();
+          QString cdInfo;
+          for (auto it = m_passiveCooldown.constBegin(); it != m_passiveCooldown.constEnd(); ++it) {
+            int secsLeft = (it.value() - now) / 1000;
+            if (secsLeft > 0) {
+              if (!cdInfo.isEmpty()) cdInfo += ", ";
+              cdInfo += it.key() + " " + QString::number(secsLeft/60) + ":" + QString::number(secsLeft%60).rightJustified(2,'0');
+            }
+          }
+          if (!cdInfo.isEmpty())
+            update_autoseq_status(tr("Monitoring (CD: %1)").arg(cdInfo));
+          else
+            update_autoseq_status(tr("Monitoring"));
+        } else {
+          update_autoseq_status(tr("Monitoring"));
         }
     } else if (m_transmittedQSOProgress != CALLING) {
         on_txb6_clicked();
@@ -3651,6 +3683,7 @@ void MainWindow::process_Auto()
     switch (m_status) {
       case QsoHistory::RFIN:
       case QsoHistory::RCQ: {
+        update_autoseq_status(tr("Calling %1").arg(m_hisCall));
         if (m_skipTx1 && !m_houndMode) {
           on_txb2_clicked();
           if(ui->tabWidget->currentIndex()==1) { ui->genMsg->setText(ui->tx2->text()); m_ntx=7; } }
@@ -3660,6 +3693,7 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::RCALL: {
+        update_autoseq_status(tr("%1 replied, sending report").arg(m_hisCall));
         if(m_enableTx && m_autoseq && m_callMode>0) txwatchdog (false);
         on_txb2_clicked();
         if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx2->text());
@@ -3667,6 +3701,7 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::RREPORT: {
+        update_autoseq_status(tr("%1 sent report, sending R+rpt").arg(m_hisCall));
         if(m_enableTx && m_autoseq && m_callMode>0) txwatchdog (false);
         if(m_autofilter && m_enableTx && !m_filter) autoFilter (true);
         on_txb3_clicked();
@@ -3674,11 +3709,13 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::RRREPORT: {
+        update_autoseq_status(tr("%1 exchange, sending RR73").arg(m_hisCall));
         on_txb4_clicked();
         if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx4->text());
         break;
       }
       case QsoHistory::RRR: {
+        update_autoseq_status(tr("%1 RRR, sending 73").arg(m_hisCall));
         on_txb5_clicked();
         if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx5->currentText());
         break;
@@ -3711,7 +3748,8 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::FIN: {
-        if (m_singleshot) 
+        update_autoseq_status(tr("QSO complete with %1").arg(m_hisCall));
+        if (m_singleshot)
           autoStopTx("FIN, end of QSO, Singleshot ");
         else if (m_config.autolog())
           autoStopTx("FIN, end of QSO, Autolog ");
@@ -8078,6 +8116,17 @@ void MainWindow::update_watchdog_label ()
       txwatchdog_label->setText (QString {});
       txwatchdog_label->setVisible (false);
     }
+}
+
+void MainWindow::update_autoseq_status (QString const& status)
+{
+  if (m_passiveMode || m_autoseq) {
+    autoseq_status_label->setText(status);
+    autoseq_status_label->setVisible(true);
+  } else {
+    autoseq_status_label->setText(QString {});
+    autoseq_status_label->setVisible(false);
+  }
 }
 
 void MainWindow::on_cbMenus_toggled(bool b)
