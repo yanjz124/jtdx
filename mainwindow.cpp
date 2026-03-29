@@ -3627,7 +3627,11 @@ void MainWindow::process_Auto()
       }
       if (!rpt.isEmpty () && rpt == m_rpt) m_rpt = "-60";
       // Update status with what we're about to do
-      update_autoseq_status(tr("Answering %1 (%2)").arg(hisCall).arg(count > 0 ? QString::number(count) : "new"));
+      {
+        int maxRetries = m_config.answerCQCount() ? m_config.nAnswerCQCounter() : 99;
+        if (m_passiveMode && m_reply_other) maxRetries += 4;
+        update_autoseq_status(tr("Found CQ from %1 → calling [%2/%3]").arg(hisCall).arg(count > 0 ? QString::number(count) : "1").arg(maxRetries));
+      }
     } else if (m_passiveMode) {
         // Passive mode: never call CQ, halt if already calling CQ
         if (m_transmittedQSOProgress == CALLING && (m_enableTx || m_transmitting)) {
@@ -3683,7 +3687,11 @@ void MainWindow::process_Auto()
     switch (m_status) {
       case QsoHistory::RFIN:
       case QsoHistory::RCQ: {
-        update_autoseq_status(tr("Calling %1").arg(m_hisCall));
+        {
+          int maxRetries = m_config.answerCQCount() ? m_config.nAnswerCQCounter() : 99;
+          if (m_passiveMode && m_reply_other) maxRetries += 4;
+          update_autoseq_status(tr("Calling %1 [%2/%3] → wait for reply").arg(m_hisCall).arg(count).arg(maxRetries));
+        }
         if (m_skipTx1 && !m_houndMode) {
           on_txb2_clicked();
           if(ui->tabWidget->currentIndex()==1) { ui->genMsg->setText(ui->tx2->text()); m_ntx=7; } }
@@ -3693,7 +3701,7 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::RCALL: {
-        update_autoseq_status(tr("%1 replied, sending report").arg(m_hisCall));
+        update_autoseq_status(tr("%1 replied → sending report").arg(m_hisCall));
         if(m_enableTx && m_autoseq && m_callMode>0) txwatchdog (false);
         on_txb2_clicked();
         if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx2->text());
@@ -3701,7 +3709,7 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::RREPORT: {
-        update_autoseq_status(tr("%1 sent report, sending R+rpt").arg(m_hisCall));
+        update_autoseq_status(tr("%1 sent report → sending R+rpt").arg(m_hisCall));
         if(m_enableTx && m_autoseq && m_callMode>0) txwatchdog (false);
         if(m_autofilter && m_enableTx && !m_filter) autoFilter (true);
         on_txb3_clicked();
@@ -3709,13 +3717,13 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::RRREPORT: {
-        update_autoseq_status(tr("%1 exchange, sending RR73").arg(m_hisCall));
+        update_autoseq_status(tr("%1 R+rpt rcvd → sending RR73").arg(m_hisCall));
         on_txb4_clicked();
         if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx4->text());
         break;
       }
       case QsoHistory::RRR: {
-        update_autoseq_status(tr("%1 RRR, sending 73").arg(m_hisCall));
+        update_autoseq_status(tr("%1 RRR rcvd → sending 73, QSO done!").arg(m_hisCall));
         on_txb5_clicked();
         if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx5->currentText());
         break;
