@@ -3085,15 +3085,17 @@ void MainWindow::on_actionPassiveMode_toggled(bool checked)
 void MainWindow::on_skipCallButton_clicked()
 {
   if (!m_hisCall.isEmpty()) {
-    // Put current station on cooldown and clear DX
-    // Don't interrupt current TX - just prevent the next one
-    m_passiveCooldown.insert(Radio::base_callsign(m_hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
-    update_autoseq_status(tr("Skipping %1 after this TX → cooldown 3m").arg(m_hisCall));
+    // Put current station on cooldown
+    // Don't call clearDX() as that switches to CQ mode and can cut TX
+    // Just clear the DX fields and let process_Auto handle the rest
+    QString skippedCall = m_hisCall;
+    m_passiveCooldown.insert(Radio::base_callsign(skippedCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
+    update_autoseq_status(tr("Skipping %1 after this TX → cooldown 3m").arg(skippedCall));
     if(m_config.write_decoded_debug())
-      writeToALLTXT("Manual skip: " + m_hisCall + ", cooldown 3min, finishing current TX");
-    m_qsoHistory.reset_count(m_hisCall);
-    clearDX(" cleared, manual skip");
-    // Don't set m_bTxTime=false — let current transmission complete naturally
+      writeToALLTXT("Manual skip: " + skippedCall + ", cooldown 3min");
+    m_qsoHistory.reset_count(skippedCall);
+    // Just clear the call/grid fields - don't change TX state
+    clearDXfields(" cleared, manual skip");
   }
 }
 
