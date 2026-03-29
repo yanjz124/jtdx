@@ -3538,6 +3538,14 @@ void MainWindow::process_Auto()
   int rx = ui->RxFreqSpinBox->value ();
   int tx = ui->TxFreqSpinBox->value ();
   QStringList StrStatus = {"NONE","RFIN","RCQ","SCQ","RCALL","SCALL","RREPORT","SREPORT","RRREPORT","SRREPORT","RRR","SRR","RRR73","SRR73","R73","S73","FIN"};
+  // Passive mode: if current DX call is on cooldown, clear it immediately
+  if (m_passiveMode && !hisCall.isEmpty() && m_passiveCooldown.contains(Radio::base_callsign(hisCall))) {
+    if(m_config.write_decoded_debug())
+      writeToALLTXT("Passive mode: " + hisCall + " is on cooldown, clearing DX");
+    clearDX(" cleared, station on cooldown");
+    hisCall = m_hisCall;  // now empty
+    grid = m_hisGrid;
+  }
   if (!hisCall.isEmpty ()) {
     if (m_houndMode) count = -1; //marker for changing status to FIN when status is RRR73
     m_status = m_qsoHistory.autoseq(hisCall,grid,rpt,rx,tx,time,count,prio,mode);
@@ -3731,7 +3739,7 @@ void MainWindow::process_Auto()
             }
           }
           if (!cdInfo.isEmpty())
-            update_autoseq_status(tr("Monitoring (CD: %1)").arg(cdInfo));
+            update_autoseq_status(tr("Monitoring (Cooldown: %1)").arg(cdInfo));
           else
             update_autoseq_status(tr("Monitoring"));
         } else {
