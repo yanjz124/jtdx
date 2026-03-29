@@ -2450,6 +2450,7 @@ void MainWindow::displayDialFrequency ()
         clearDX (" cleared, triggered by erase both windows option upon band change from transceiver");
       }
       m_qsoHistory.init();
+      m_passiveCooldown.clear();
       if(m_config.write_decoded_debug()) {
         QString text = startup ? "program startup, m_lastBand: " : "QSO history initialized by band change from transceiver, m_lastBand: ";
         writeToALLTXT(text + m_lastBand + ", current band: " + band_name + ", dial_frequency: " + QString::number(dial_frequency) + ", TX VFO frequency: " + 
@@ -3493,19 +3494,38 @@ void MainWindow::process_Auto()
       m_status = QsoHistory::NONE;
     } else if ((m_status == QsoHistory::RCQ || m_status == QsoHistory::SCALL || (m_status == QsoHistory::SREPORT && m_skipTx1 && !m_houndMode)) && m_config.answerCQCount() &&
         ((prio > 4 && prio < 17) || prio < 2 || m_strictdirCQ) && (m_config.nAnswerCQCounter() <= count || m_reply_other)) {
-      clearDX (" cleared, RCQ/SCALL/SREPORT count reached");
-      if (m_reply_other)
-          counters2 = false;
-      else {
-          m_counter = m_config.nAnswerCQCounter(); 
-          m_qsoHistory.calllist(hisCall,rpt.toInt(),time);
+      if (m_passiveMode && m_reply_other && count < m_config.nAnswerCQCounter() + 4) {
+        // Passive mode: station is busy answering others, keep trying longer
+        // They might get to us after their current QSO
+        if(m_config.write_decoded_debug())
+          writeToALLTXT("Passive mode: " + hisCall + " busy with other station, extending retry (" + QString::number(count) + ")");
+      } else {
+        // Normal give-up logic (or passive mode max retries reached)
+        if (m_passiveMode && !m_reply_other) {
+          // Passive mode: station keeps CQing and ignoring us, put on 3-minute cooldown
+          m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
+          if(m_config.write_decoded_debug())
+            writeToALLTXT("Passive mode: " + hisCall + " not responding, cooldown 3min");
+        } else if (m_passiveMode) {
+          // Passive mode: station answered others too many times, longer cooldown
+          m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 300000);
+          if(m_config.write_decoded_debug())
+            writeToALLTXT("Passive mode: " + hisCall + " never answered us, cooldown 5min");
+        }
+        clearDX (" cleared, RCQ/SCALL/SREPORT count reached");
+        if (m_reply_other)
+            counters2 = false;
+        else {
+            m_counter = m_config.nAnswerCQCounter();
+            m_qsoHistory.calllist(hisCall,rpt.toInt(),time);
+        }
+        count = m_qsoHistory.reset_count(hisCall);
+        hisCall = m_hisCall;
+        grid = m_hisGrid;
+        m_status = QsoHistory::NONE;
+        if (m_singleshot)
+          counters = false;
       }
-      count = m_qsoHistory.reset_count(hisCall);
-      hisCall = m_hisCall;
-      grid = m_hisGrid;
-      m_status = QsoHistory::NONE;
-      if (m_singleshot)
-        counters = false;
     } else if ((m_status == QsoHistory::RCALL || (m_status == QsoHistory::SREPORT && !m_skipTx1)) && m_config.answerInCallCount() && 
         (m_config.nAnswerInCallCounter() <= count || m_reply_other)) {
       clearDX (" cleared, RCALL/SREPORT count reached");
@@ -3550,7 +3570,23 @@ void MainWindow::process_Auto()
     else if (m_callHigherNewCall) time |= 256;
     if (m_rprtPriority) time |= 16;
     if (m_maxDistance) time |= 32;
+    // Passive mode: clean up expired cooldowns before searching CQs
+    if (m_passiveMode && !m_passiveCooldown.isEmpty()) {
+      auto now = m_jtdxtime->currentMSecsSinceEpoch2();
+      QMutableHashIterator<QString, qint64> it(m_passiveCooldown);
+      while (it.hasNext()) {
+        it.next();
+        if (now >= it.value()) it.remove();
+      }
+    }
     m_status = m_qsoHistory.autoseq(hisCall,grid,rpt,rx,tx,time,count,prio,mode);
+    // Passive mode: skip stations on cooldown
+    if (m_passiveMode && !hisCall.isEmpty() && m_passiveCooldown.contains(Radio::base_callsign(hisCall))) {
+      if(m_config.write_decoded_debug())
+        writeToALLTXT("Passive mode: skipping " + hisCall + " (on cooldown), staying in monitor");
+      hisCall = "";
+      m_status = QsoHistory::NONE;
+    }
     if(m_config.write_decoded_debug()) {
       QString StrDirection = "";
       if(m_status == QsoHistory::FIN) StrDirection = " auto sequence is finished;";

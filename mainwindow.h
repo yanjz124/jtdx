@@ -566,6 +566,7 @@ private:
   bool m_callHigherNewCall;
   bool m_singleshot;
   bool m_passiveMode;
+  QHash<QString, qint64> m_passiveCooldown;  // callsign -> cooldown expiry timestamp (ms)
   bool m_autofilter;
   bool m_houndMode;
   bool m_commonFT8b;
