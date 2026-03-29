@@ -444,6 +444,7 @@ private:
   Q_SLOT void on_force_DTR_combo_box_currentIndexChanged (int);
   Q_SLOT void on_force_RTS_combo_box_currentIndexChanged (int);
   Q_SLOT void on_rig_combo_box_currentIndexChanged (int);
+  Q_SLOT void on_auto_detect_port_push_button_clicked ();
   Q_SLOT void on_refresh_push_button_clicked ();
   Q_SLOT void on_tci_audio_check_box_clicked(bool checked);
   Q_SLOT void on_sound_input_combo_box_currentTextChanged (QString const&);
