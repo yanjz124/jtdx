@@ -2412,7 +2412,7 @@ ZD8,ZD9,ZF,ZK3,ZL,ZL7,ZL8,ZL9,ZP,ZS,ZS8&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</str
               <property name="minimumSize">
                <size>
                 <width>68</width>
-                <height>25</height>
+                <height>30</height>
                </size>
               </property>
               <property name="toolTip">
@@ -2437,7 +2437,7 @@ ZD8,ZD9,ZF,ZK3,ZL,ZL7,ZL8,ZL9,ZP,ZS,ZS8&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</str
               <property name="minimumSize">
                <size>
                 <width>68</width>
-                <height>25</height>
+                <height>30</height>
                </size>
               </property>
               <property name="toolTip">
