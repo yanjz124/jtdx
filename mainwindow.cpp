@@ -3096,6 +3096,8 @@ void MainWindow::on_skipCallButton_clicked()
     m_qsoHistory.reset_count(skippedCall);
     // Just clear the call/grid fields - don't change TX state
     clearDXfields(" cleared, manual skip");
+    // Reset counter so CQ search runs immediately on next cycle
+    m_counter = 0;
   }
 }
 
