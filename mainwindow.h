@@ -183,6 +183,7 @@ private slots:
   void on_actionSingleShot_toggled(bool checked);
   void on_actionPassiveMode_toggled(bool checked);
   void on_skipCallButton_clicked();
+  void on_webGuiButton_clicked(bool checked);
   void on_actionAutoFilter_toggled(bool checked);
   void on_actionEnable_hound_mode_toggled(bool checked);
   void on_actionUse_TX_frequency_jumps_triggered(bool checked);
@@ -569,6 +570,7 @@ private:
   bool m_singleshot;
   bool m_passiveMode;
   QHash<QString, qint64> m_passiveCooldown;  // callsign -> cooldown expiry timestamp (ms)
+  QProcess * m_webServerProcess;
   bool m_autofilter;
   bool m_houndMode;
   bool m_commonFT8b;

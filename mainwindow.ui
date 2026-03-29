@@ -2402,6 +2402,37 @@ ZD8,ZD9,ZF,ZK3,ZL,ZL7,ZL8,ZL9,ZP,ZS,ZS8&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</str
              </spacer>
             </item>
             <item>
+             <widget class="QPushButton" name="webGuiButton">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                <horstretch>1</horstretch>
+                <verstretch>1</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>68</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>75</width>
+                <height>7</height>
+               </size>
+              </property>
+              <property name="toolTip">
+               <string>Launch the web remote GUI. Access from iPad or another computer on your network.</string>
+              </property>
+              <property name="text">
+               <string>Web</string>
+              </property>
+              <property name="checkable">
+               <bool>true</bool>
+              </property>
+             </widget>
+            </item>
+            <item>
              <widget class="QPushButton" name="skipCallButton">
               <property name="sizePolicy">
                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
@@ -2418,7 +2449,7 @@ ZD8,ZD9,ZF,ZK3,ZL,ZL7,ZL8,ZL9,ZP,ZS,ZS8&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</str
               <property name="maximumSize">
                <size>
                 <width>75</width>
-                <height>16777215</height>
+                <height>7</height>
                </size>
               </property>
               <property name="toolTip">

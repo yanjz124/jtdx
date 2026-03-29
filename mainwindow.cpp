@@ -299,6 +299,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_answerWorkedB4 {false},
   m_singleshot {false},
   m_passiveMode {false},
+  m_webServerProcess {nullptr},
   m_autofilter {false},
   m_houndMode {false},
   m_commonFT8b {true},
@@ -3085,14 +3086,68 @@ void MainWindow::on_skipCallButton_clicked()
 {
   if (!m_hisCall.isEmpty()) {
     // Put current station on cooldown and clear DX
+    // Don't interrupt current TX - just prevent the next one
     m_passiveCooldown.insert(Radio::base_callsign(m_hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
-    update_autoseq_status(tr("Skipped %1 → cooldown 3m").arg(m_hisCall));
+    update_autoseq_status(tr("Skipping %1 after this TX → cooldown 3m").arg(m_hisCall));
     if(m_config.write_decoded_debug())
-      writeToALLTXT("Manual skip: " + m_hisCall + ", cooldown 3min");
+      writeToALLTXT("Manual skip: " + m_hisCall + ", cooldown 3min, finishing current TX");
     m_qsoHistory.reset_count(m_hisCall);
     clearDX(" cleared, manual skip");
-    m_bTxTime = false;
-    m_txNext = false;
+    // Don't set m_bTxTime=false — let current transmission complete naturally
+  }
+}
+
+void MainWindow::on_webGuiButton_clicked(bool checked)
+{
+  if (checked) {
+    // Start web server
+    if (m_webServerProcess && m_webServerProcess->state() != QProcess::NotRunning) {
+      return; // already running
+    }
+    if (!m_webServerProcess) {
+      m_webServerProcess = new QProcess(this);
+      connect(m_webServerProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+              [this](int, QProcess::ExitStatus) {
+                ui->webGuiButton->setChecked(false);
+                ui->webGuiButton->setStyleSheet("");
+              });
+    }
+    // Find the web server script relative to the application
+    QString scriptDir = QCoreApplication::applicationDirPath() + "/../jtdx-web";
+    if (!QFile::exists(scriptDir + "/server.py")) {
+      // Try home directory
+      scriptDir = QDir::homePath() + "/jtdx-web";
+    }
+    if (!QFile::exists(scriptDir + "/server.py")) {
+      update_autoseq_status(tr("Web GUI: server.py not found"));
+      ui->webGuiButton->setChecked(false);
+      return;
+    }
+    int webPort = 8073;
+    int udpPort = m_settings->value("UDPServerPort", 2237).toInt();
+    m_webServerProcess->setWorkingDirectory(scriptDir);
+    m_webServerProcess->start("python", QStringList() << "server.py"
+                              << "--port" << QString::number(webPort)
+                              << "--udp-port" << QString::number(udpPort));
+    if (m_webServerProcess->waitForStarted(3000)) {
+      ui->webGuiButton->setStyleSheet("QPushButton {background: #00ff00; color: #000; border-radius: 5px; border: 1px solid black;}");
+      update_autoseq_status(tr("Web GUI running on port %1").arg(webPort));
+      // Open browser
+      QDesktopServices::openUrl(QUrl(QString("http://localhost:%1").arg(webPort)));
+    } else {
+      update_autoseq_status(tr("Web GUI: failed to start server"));
+      ui->webGuiButton->setChecked(false);
+    }
+  } else {
+    // Stop web server
+    if (m_webServerProcess && m_webServerProcess->state() != QProcess::NotRunning) {
+      m_webServerProcess->terminate();
+      if (!m_webServerProcess->waitForFinished(3000)) {
+        m_webServerProcess->kill();
+      }
+    }
+    ui->webGuiButton->setStyleSheet("");
+    update_autoseq_status(tr("Web GUI stopped"));
   }
 }
 
