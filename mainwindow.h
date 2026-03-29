@@ -182,6 +182,7 @@ private slots:
   void on_actionCallHigherNewCall_toggled(bool checked);
   void on_actionSingleShot_toggled(bool checked);
   void on_actionPassiveMode_toggled(bool checked);
+  void on_skipCallButton_clicked();
   void on_actionAutoFilter_toggled(bool checked);
   void on_actionEnable_hound_mode_toggled(bool checked);
   void on_actionUse_TX_frequency_jumps_triggered(bool checked);

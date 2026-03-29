@@ -3081,6 +3081,21 @@ void MainWindow::on_actionPassiveMode_toggled(bool checked)
   setAutoSeqButtonStyle(m_autoseq);
 }
 
+void MainWindow::on_skipCallButton_clicked()
+{
+  if (!m_hisCall.isEmpty()) {
+    // Put current station on cooldown and clear DX
+    m_passiveCooldown.insert(Radio::base_callsign(m_hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
+    update_autoseq_status(tr("Skipped %1 → cooldown 3m").arg(m_hisCall));
+    if(m_config.write_decoded_debug())
+      writeToALLTXT("Manual skip: " + m_hisCall + ", cooldown 3min");
+    m_qsoHistory.reset_count(m_hisCall);
+    clearDX(" cleared, manual skip");
+    m_bTxTime = false;
+    m_txNext = false;
+  }
+}
+
 void MainWindow::on_actionAutoFilter_toggled(bool checked)
 {
   m_autofilter=checked;
@@ -3503,27 +3518,34 @@ void MainWindow::process_Auto()
       m_status = QsoHistory::NONE;
     } else if ((m_status == QsoHistory::RCQ || m_status == QsoHistory::SCALL || (m_status == QsoHistory::SREPORT && m_skipTx1 && !m_houndMode)) && m_config.answerCQCount() &&
         ((prio > 4 && prio < 17) || prio < 2 || m_strictdirCQ) && (m_config.nAnswerCQCounter() <= count || m_reply_other)) {
-      if (m_passiveMode && m_reply_other && count < m_config.nAnswerCQCounter() + 4) {
-        // Passive mode: station is busy answering others, keep trying longer
-        int maxRetries = m_config.nAnswerCQCounter() + 4;
-        update_autoseq_status(tr("%1 busy, retry %2/%3").arg(hisCall).arg(count).arg(maxRetries));
-        if(m_config.write_decoded_debug())
-          writeToALLTXT("Passive mode: " + hisCall + " busy with other station, extending retry (" + QString::number(count) + ")");
-      } else {
-        // Normal give-up logic (or passive mode max retries reached)
-        if (m_passiveMode && !m_reply_other) {
-          // Passive mode: station keeps CQing and ignoring us, put on 3-minute cooldown
-          m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
-          update_autoseq_status(tr("%1 no reply, cooldown 3m").arg(hisCall));
+      {
+        // Determine max retries for passive mode
+        int baseMax = m_config.nAnswerCQCounter();
+        int maxRetries = m_passiveMode ? (m_reply_other ? baseMax + 4 : baseMax) : baseMax;
+        int remaining = maxRetries - count;
+        if (remaining < 0) remaining = 0;
+
+        if (m_passiveMode && remaining > 0) {
+          // Passive mode: still have retries left
+          if (m_reply_other)
+            update_autoseq_status(tr("%1 busy with others [try %2 of %3, %4 left]").arg(hisCall).arg(count).arg(maxRetries).arg(remaining));
+          else
+            update_autoseq_status(tr("Calling %1 [try %2 of %3, %4 left]").arg(hisCall).arg(count).arg(maxRetries).arg(remaining));
           if(m_config.write_decoded_debug())
-            writeToALLTXT("Passive mode: " + hisCall + " not responding, cooldown 3min");
-        } else if (m_passiveMode) {
-          // Passive mode: station answered others too many times, longer cooldown
-          m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 300000);
-          update_autoseq_status(tr("%1 no reply, cooldown 5m").arg(hisCall));
-          if(m_config.write_decoded_debug())
-            writeToALLTXT("Passive mode: " + hisCall + " never answered us, cooldown 5min");
-        }
+            writeToALLTXT("Passive mode: " + hisCall + " retry " + QString::number(count) + "/" + QString::number(maxRetries));
+        } else {
+          // Give up - max retries reached
+          if (m_passiveMode && !m_reply_other) {
+            m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
+            update_autoseq_status(tr("%1 no reply after %2 tries → cooldown 3m").arg(hisCall).arg(count));
+            if(m_config.write_decoded_debug())
+              writeToALLTXT("Passive mode: " + hisCall + " not responding, cooldown 3min");
+          } else if (m_passiveMode) {
+            m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 300000);
+            update_autoseq_status(tr("%1 never answered after %2 tries → cooldown 5m").arg(hisCall).arg(count));
+            if(m_config.write_decoded_debug())
+              writeToALLTXT("Passive mode: " + hisCall + " never answered us, cooldown 5min");
+          }
         clearDX (" cleared, RCQ/SCALL/SREPORT count reached");
         if (m_reply_other)
             counters2 = false;
@@ -3629,8 +3651,9 @@ void MainWindow::process_Auto()
       // Update status with what we're about to do
       {
         int maxRetries = m_config.answerCQCount() ? m_config.nAnswerCQCounter() : 99;
-        if (m_passiveMode && m_reply_other) maxRetries += 4;
-        update_autoseq_status(tr("Found CQ from %1 → calling [%2/%3]").arg(hisCall).arg(count > 0 ? QString::number(count) : "1").arg(maxRetries));
+        if (m_passiveMode) maxRetries += 4;
+        int attempt = qMin(count > 0 ? count : 1, maxRetries);
+        update_autoseq_status(tr("Found CQ from %1 → calling [try %2 of %3]").arg(hisCall).arg(attempt).arg(maxRetries));
       }
     } else if (m_passiveMode) {
         // Passive mode: never call CQ, halt if already calling CQ
@@ -3689,8 +3712,9 @@ void MainWindow::process_Auto()
       case QsoHistory::RCQ: {
         {
           int maxRetries = m_config.answerCQCount() ? m_config.nAnswerCQCounter() : 99;
-          if (m_passiveMode && m_reply_other) maxRetries += 4;
-          update_autoseq_status(tr("Calling %1 [%2/%3] → wait for reply").arg(m_hisCall).arg(count).arg(maxRetries));
+          if (m_passiveMode) maxRetries += 4;
+          int attempt = qMin(count > 0 ? count : 1, maxRetries);
+          update_autoseq_status(tr("Calling %1 [try %2 of %3] → wait for reply").arg(m_hisCall).arg(attempt).arg(maxRetries));
         }
         if (m_skipTx1 && !m_houndMode) {
           on_txb2_clicked();

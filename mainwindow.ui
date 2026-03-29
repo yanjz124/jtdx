@@ -2402,6 +2402,34 @@ ZD8,ZD9,ZF,ZK3,ZL,ZL7,ZL8,ZL9,ZP,ZS,ZS8&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</str
              </spacer>
             </item>
             <item>
+             <widget class="QPushButton" name="skipCallButton">
+              <property name="sizePolicy">
+               <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
+                <horstretch>1</horstretch>
+                <verstretch>1</verstretch>
+               </sizepolicy>
+              </property>
+              <property name="minimumSize">
+               <size>
+                <width>68</width>
+                <height>0</height>
+               </size>
+              </property>
+              <property name="maximumSize">
+               <size>
+                <width>75</width>
+                <height>7</height>
+               </size>
+              </property>
+              <property name="toolTip">
+               <string>Skip current station and move on to the next CQ. Puts the station on a 3-minute cooldown.</string>
+              </property>
+              <property name="text">
+               <string>Skip</string>
+              </property>
+             </widget>
+            </item>
+            <item>
              <widget class="QPushButton" name="tuneButton">
               <property name="sizePolicy">
                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
