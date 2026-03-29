@@ -181,6 +181,7 @@ private slots:
   void on_actionCallWorkedB4_toggled(bool checked);
   void on_actionCallHigherNewCall_toggled(bool checked);
   void on_actionSingleShot_toggled(bool checked);
+  void on_actionPassiveMode_toggled(bool checked);
   void on_actionAutoFilter_toggled(bool checked);
   void on_actionEnable_hound_mode_toggled(bool checked);
   void on_actionUse_TX_frequency_jumps_triggered(bool checked);
@@ -564,6 +565,7 @@ private:
   bool m_callWorkedB4;
   bool m_callHigherNewCall;
   bool m_singleshot;
+  bool m_passiveMode;
   bool m_autofilter;
   bool m_houndMode;
   bool m_commonFT8b;

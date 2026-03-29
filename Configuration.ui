@@ -890,26 +890,48 @@ quiet period when decoding is done.</string>
              </widget>
             </item>
             <item row="0" column="1">
-             <widget class="QComboBox" name="CAT_port_combo_box">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
-                <horstretch>1</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="toolTip">
-               <string>Serial port used for CAT control.</string>
-              </property>
-              <property name="editable">
-               <bool>true</bool>
-              </property>
-              <property name="currentText">
-               <string/>
-              </property>
-              <property name="insertPolicy">
-               <enum>QComboBox::NoInsert</enum>
-              </property>
-             </widget>
+             <layout class="QHBoxLayout" name="cat_port_layout">
+              <item>
+               <widget class="QComboBox" name="CAT_port_combo_box">
+                <property name="sizePolicy">
+                 <sizepolicy hsizetype="MinimumExpanding" vsizetype="Fixed">
+                  <horstretch>1</horstretch>
+                  <verstretch>0</verstretch>
+                 </sizepolicy>
+                </property>
+                <property name="toolTip">
+                 <string>Serial port used for CAT control.
+Hover over each port to see device details.</string>
+                </property>
+                <property name="editable">
+                 <bool>true</bool>
+                </property>
+                <property name="currentText">
+                 <string/>
+                </property>
+                <property name="insertPolicy">
+                 <enum>QComboBox::NoInsert</enum>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="auto_detect_port_push_button">
+                <property name="toolTip">
+                 <string>Auto-detect serial port for your rig.
+Works when only one USB-serial adapter is connected.</string>
+                </property>
+                <property name="text">
+                 <string>Auto</string>
+                </property>
+                <property name="maximumSize">
+                 <size>
+                  <width>50</width>
+                  <height>16777215</height>
+                 </size>
+                </property>
+               </widget>
+              </item>
+             </layout>
             </item>
            </layout>
           </item>

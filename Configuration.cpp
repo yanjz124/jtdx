@@ -414,6 +414,7 @@ private:
   bool validate ();
   void message_box_critical (QString const& reason, QString const& detail = QString ());
   void fill_port_combo_box (QComboBox *);
+  QString auto_detect_serial_port (QString const& rig_name);
   Frequency apply_calibration (Frequency) const;
   Frequency remove_calibration (Frequency) const;
 
@@ -872,9 +873,11 @@ private:
 
   QAudioDeviceInfo audio_input_device_;
   bool default_audio_input_device_selected_;
+  QString saved_audio_input_name_;    // remember configured device name even if temporarily unavailable
   AudioDevice::Channel audio_input_channel_;
   QAudioDeviceInfo audio_output_device_;
   bool default_audio_output_device_selected_;
+  QString saved_audio_output_name_;   // remember configured device name even if temporarily unavailable
   AudioDevice::Channel audio_output_channel_;
   
   
@@ -2326,6 +2329,7 @@ void Configuration::impl::read_settings ()
     // retrieve audio input device
     //
     auto saved_name = settings_->value ("SoundInName").toString ();
+    saved_audio_input_name_ = saved_name;
 
     // deal with special Windows default audio devices
     auto default_device = QAudioDeviceInfo::defaultInputDevice ();
@@ -2337,12 +2341,20 @@ void Configuration::impl::read_settings ()
     else
       {
         default_audio_input_device_selected_ = false;
+        bool found = false;
         Q_FOREACH (auto const& p, QAudioDeviceInfo::availableDevices (QAudio::AudioInput)) // available audio input devices
           {
             if (p.deviceName () == saved_name)
               {
                 audio_input_device_ = p;
+                found = true;
               }
+          }
+        if (!found && !saved_name.isEmpty ())
+          {
+            // Device not currently available - keep saved name for later retry
+            // but use default for now so audio works
+            audio_input_device_ = default_device;
           }
       }
   }
@@ -2352,6 +2364,7 @@ void Configuration::impl::read_settings ()
     // retrieve audio output device
     //
     auto saved_name = settings_->value("SoundOutName").toString();
+    saved_audio_output_name_ = saved_name;
 
     // deal with special Windows default audio devices
     auto default_device = QAudioDeviceInfo::defaultOutputDevice ();
@@ -2363,12 +2376,20 @@ void Configuration::impl::read_settings ()
     else
       {
         default_audio_output_device_selected_ = false;
+        bool found = false;
         Q_FOREACH (auto const& p, QAudioDeviceInfo::availableDevices (QAudio::AudioOutput)) // available audio output devices
           {
             if (p.deviceName () == saved_name)
               {
                 audio_output_device_ = p;
+                found = true;
               }
+          }
+        if (!found && !saved_name.isEmpty ())
+          {
+            // Device not currently available - keep saved name for later retry
+            // but use default for now so audio works
+            audio_output_device_ = default_device;
           }
       }
   }
@@ -2709,6 +2730,11 @@ void Configuration::impl::write_settings ()
     {
       settings_->setValue ("SoundInName", QAudioDeviceInfo::defaultInputDevice ().deviceName ());
     }
+  else if (!saved_audio_input_name_.isEmpty ())
+    {
+      // Save the user's intended device name, not a fallback default
+      settings_->setValue ("SoundInName", saved_audio_input_name_);
+    }
   else
     {
       settings_->setValue ("SoundInName", audio_input_device_.deviceName ());
@@ -2717,6 +2743,11 @@ void Configuration::impl::write_settings ()
   if (default_audio_output_device_selected_)
     {
       settings_->setValue ("SoundOutName", QAudioDeviceInfo::defaultOutputDevice ().deviceName ());
+    }
+  else if (!saved_audio_output_name_.isEmpty ())
+    {
+      // Save the user's intended device name, not a fallback default
+      settings_->setValue ("SoundOutName", saved_audio_output_name_);
     }
   else
     {
@@ -2951,7 +2982,12 @@ void Configuration::impl::set_rig_invariants ()
               ui_->CAT_port_combo_box->setCurrentText (rig_params_.serial_port);
               if (ui_->CAT_port_combo_box->currentText ().isEmpty () && ui_->CAT_port_combo_box->count ())
                 {
-                  ui_->CAT_port_combo_box->setCurrentText (ui_->CAT_port_combo_box->itemText (0));
+                  // Try auto-detecting the port for this rig
+                  auto detected = auto_detect_serial_port (rig);
+                  if (!detected.isEmpty ())
+                    ui_->CAT_port_combo_box->setCurrentText (detected);
+                  else
+                    ui_->CAT_port_combo_box->setCurrentText (ui_->CAT_port_combo_box->itemText (0));
                 }
               ui_->CAT_port_label->setText (tr ("Serial Port:"));
               ui_->CAT_port_combo_box->setToolTip (tr ("Serial port used for CAT control"));
@@ -3218,6 +3254,7 @@ void Configuration::impl::accept ()
     auto const& device_name = ui_->sound_input_combo_box->currentText ();
     if (device_name != audio_input_device_.deviceName ())
       {
+        saved_audio_input_name_ = device_name;  // remember user's explicit choice
         auto const& default_device = QAudioDeviceInfo::defaultInputDevice ();
         if (device_name == default_device.deviceName ())
           {
@@ -3247,6 +3284,7 @@ void Configuration::impl::accept ()
     auto const& device_name = ui_->sound_output_combo_box->currentText ();
     if (device_name != audio_output_device_.deviceName ())
       {
+        saved_audio_output_name_ = device_name;  // remember user's explicit choice
         auto const& default_device = QAudioDeviceInfo::defaultOutputDevice ();
         if (device_name == default_device.deviceName ())
           {
@@ -4818,6 +4856,25 @@ void Configuration::impl::on_rig_combo_box_currentIndexChanged (int /* index */)
   }
 }
 
+void Configuration::impl::on_auto_detect_port_push_button_clicked ()
+{
+  auto const& rig = ui_->rig_combo_box->currentText ();
+  auto detected = auto_detect_serial_port (rig);
+  if (!detected.isEmpty ())
+    {
+      ui_->CAT_port_combo_box->setCurrentText (detected);
+    }
+  else
+    {
+      JTDXMessageBox::warning_message (this, tr ("Auto-detect"),
+        tr ("Could not auto-detect serial port.\n\n"
+            "Make sure your rig is connected via USB and only one\n"
+            "USB-serial adapter is plugged in, then try again.\n\n"
+            "If multiple adapters are connected, select the port manually\n"
+            "(hover over each port to see device details)."));
+    }
+}
+
 void Configuration::impl::on_CAT_data_bits_button_group_buttonClicked (int /* id */)
 {
   set_rig_invariants ();
@@ -6118,11 +6175,38 @@ bool Configuration::impl::load_audio_devices (QAudio::Mode mode, QComboBox * com
           default_index = combo_box->count () - 1;
         }
     }
-  if (current_index < 0)	// not found - use default
+  if (current_index < 0)	// not found
     {
-      *device = default_device;
-      result = true;
-      current_index = default_index;
+      // Try to match against the saved device name before falling back to default
+      auto const& saved_name = (mode == QAudio::AudioInput) ? saved_audio_input_name_ : saved_audio_output_name_;
+      if (!saved_name.isEmpty ())
+        {
+          // Re-enumerate devices in case the list changed since combo box was populated
+          Q_FOREACH (auto const& p, QAudioDeviceInfo::availableDevices (mode))
+            {
+              if (p.deviceName () == saved_name)
+                {
+                  *device = p;
+                  // Find the matching combo box index
+                  for (int i = 0; i < combo_box->count (); ++i)
+                    {
+                      if (combo_box->itemText (i) == saved_name)
+                        {
+                          current_index = i;
+                          break;
+                        }
+                    }
+                  break;
+                }
+            }
+        }
+      if (current_index < 0)
+        {
+          // Device truly not available - fall back to default
+          *device = default_device;
+          result = true;
+          current_index = default_index;
+        }
     }
   combo_box->setCurrentIndex (current_index);
 
@@ -6241,11 +6325,71 @@ void Configuration::impl::fill_port_combo_box (QComboBox * cb)
         {
           // remove possibly confusing Windows device path (OK because
           // it gets added back by Hamlib)
-          cb->addItem (p.systemLocation ().remove (QRegularExpression {R"(^\\\\\.\\)"}));
+          auto port = p.systemLocation ().remove (QRegularExpression {R"(^\\\\\.\\)"});
+          auto desc = p.description ();
+          auto mfr = p.manufacturer ();
+          // Build descriptive tooltip so user can identify their device
+          QString tooltip = port;
+          if (!desc.isEmpty ()) tooltip += "\n" + desc;
+          if (!mfr.isEmpty ()) tooltip += "\n" + mfr;
+          if (p.hasVendorIdentifier () && p.hasProductIdentifier ())
+            tooltip += QString ("\nVID:PID %1:%2")
+              .arg (p.vendorIdentifier (), 4, 16, QChar('0'))
+              .arg (p.productIdentifier (), 4, 16, QChar('0'));
+          auto idx = cb->count ();
+          cb->addItem (port);
+          cb->setItemData (idx, tooltip, Qt::ToolTipRole);
         }
     }
   cb->addItem("USB");
   cb->setEditText (current_text);
+}
+
+// Auto-detect serial port for known rig USB-serial adapters
+// Returns the port name (e.g. "COM3") if a matching device is found, empty string otherwise
+QString Configuration::impl::auto_detect_serial_port (QString const& rig_name)
+{
+  // Known USB VID/PID pairs for common rig serial interfaces
+  struct UsbDeviceId {
+    quint16 vid;
+    quint16 pid;
+    const char * description;
+  };
+
+  // Elecraft KX2/KX3/K3/K4 use Silicon Labs CP210x
+  // Icom rigs often use Silicon Labs CP210x or FTDI
+  // Yaesu rigs often use Silicon Labs CP210x
+  static const UsbDeviceId known_devices[] = {
+    {0x10C4, 0xEA60, "Silicon Labs CP210x"},   // Elecraft, Yaesu, many others
+    {0x0403, 0x6001, "FTDI FT232R"},            // FTDI-based cables
+    {0x0403, 0x6015, "FTDI FT-X series"},       // FTDI newer chips
+    {0x0403, 0x6010, "FTDI FT2232"},            // FTDI dual
+    {0x067B, 0x2303, "Prolific PL2303"},        // Prolific cables
+    {0x1A86, 0x7523, "CH340"},                  // CH340 clone cables
+  };
+
+  QList<QString> candidates;
+  Q_FOREACH (auto const& p, QSerialPortInfo::availablePorts ())
+    {
+      if (p.portName ().contains ("NULL")) continue;
+      if (!p.hasVendorIdentifier () || !p.hasProductIdentifier ()) continue;
+
+      for (const auto& dev : known_devices)
+        {
+          if (p.vendorIdentifier () == dev.vid && p.productIdentifier () == dev.pid)
+            {
+              auto port = p.systemLocation ().remove (QRegularExpression {R"(^\\\\\.\\)"});
+              candidates.append (port);
+              break;
+            }
+        }
+    }
+
+  // If exactly one candidate, return it
+  if (candidates.size () == 1) return candidates.first ();
+
+  // Multiple or zero candidates - can't auto-detect reliably
+  return QString {};
 }
 
 auto Configuration::impl::apply_calibration (Frequency f) const -> Frequency

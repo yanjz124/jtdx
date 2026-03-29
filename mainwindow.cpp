@@ -298,6 +298,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_maxDistance {false},
   m_answerWorkedB4 {false},
   m_singleshot {false},
+  m_passiveMode {false},
   m_autofilter {false},
   m_houndMode {false},
   m_commonFT8b {true},
@@ -1087,6 +1088,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_callWorkedB4=ui->actionCallWorkedB4->isChecked();
   m_callHigherNewCall=ui->actionCallHigherNewCall->isChecked();
   m_singleshot=ui->actionSingleShot->isChecked();
+  m_passiveMode=ui->actionPassiveMode->isChecked();
   m_autofilter=ui->actionAutoFilter->isChecked();
   if(ui->actionEnable_hound_mode->isChecked()) on_actionEnable_hound_mode_toggled(true);
   m_wideGraph->setFilter(m_filter);
@@ -1221,6 +1223,7 @@ void MainWindow::writeSettings()
   m_settings->setValue("CallWorkedB4",ui->actionCallWorkedB4->isChecked());
   m_settings->setValue("CallHigherNewCall",ui->actionCallHigherNewCall->isChecked());
   m_settings->setValue("SingleShotQSO",ui->actionSingleShot->isChecked());
+  m_settings->setValue("PassiveMode",ui->actionPassiveMode->isChecked());
   m_settings->setValue("AutoFilter",ui->actionAutoFilter->isChecked());
   m_settings->setValue("EnableHoundMode",ui->actionEnable_hound_mode->isChecked());  
   m_settings->setValue("ShowHarmonics",ui->actionShow_messages_decoded_from_harmonics->isChecked());
@@ -1424,6 +1427,7 @@ void MainWindow::readSettings()
   ui->actionCallWorkedB4->setChecked(m_settings->value("CallWorkedB4",false).toBool());
   ui->actionCallHigherNewCall->setChecked(m_settings->value("CallHigherNewCall",false).toBool());
   ui->actionSingleShot->setChecked(m_settings->value("SingleShotQSO",false).toBool());
+  ui->actionPassiveMode->setChecked(m_settings->value("PassiveMode",false).toBool());
   ui->actionAutoFilter->setChecked(m_settings->value("AutoFilter",false).toBool());
   ui->actionEnable_hound_mode->setChecked(m_settings->value("EnableHoundMode",false).toBool());
 
@@ -1681,17 +1685,14 @@ void MainWindow::setClockStyle(bool reset)
 }
 
 void MainWindow::setAutoSeqButtonStyle(bool checked) {
+  QString textColor = "#000000";
+  if(m_singleshot) textColor = "#0000ff";
+  else if(m_passiveMode) textColor = "#ff8c00";
   if(checked) {
-    if(m_singleshot) { ui->AutoSeqButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-radius: 5px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#0000ff",m_useDarkStyle),Radio::convert_dark("#00ff00",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle))); }
-    else { ui->AutoSeqButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-radius: 5px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#00ff00",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle))); }
+    ui->AutoSeqButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-radius: 5px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark(textColor,m_useDarkStyle),Radio::convert_dark("#00ff00",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
   } else {
-    if(m_singleshot) {
-      if(m_mode.startsWith("FT")) { ui->AutoSeqButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#0000ff",m_useDarkStyle),Radio::convert_dark("#ffbbbb",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
-      else { ui->AutoSeqButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#0000ff",m_useDarkStyle),Radio::convert_dark("#e0e0e0",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }}
-    else { 
-      if(m_mode.startsWith("FT")) { ui->AutoSeqButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ffbbbb",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
-	  else { ui->AutoSeqButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#e0e0e0",m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle))); }
-    }
+    QString bgColor = m_mode.startsWith("FT") ? "#ffbbbb" : "#e0e0e0";
+    ui->AutoSeqButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 5em;padding: 3px}").arg(Radio::convert_dark(textColor,m_useDarkStyle),Radio::convert_dark(bgColor,m_useDarkStyle),Radio::convert_dark("#808080",m_useDarkStyle)));
   }
 }
 
@@ -3064,6 +3065,12 @@ void MainWindow::on_actionSingleShot_toggled(bool checked)
   ui->singleQSOButton->setChecked(checked);
 }
 
+void MainWindow::on_actionPassiveMode_toggled(bool checked)
+{
+  m_passiveMode=checked;
+  setAutoSeqButtonStyle(m_autoseq);
+}
+
 void MainWindow::on_actionAutoFilter_toggled(bool checked)
 {
   m_autofilter=checked;
@@ -3572,8 +3579,14 @@ void MainWindow::process_Auto()
       }
       if (!rpt.isEmpty () && rpt == m_rpt) m_rpt = "-60";
     } else  if (m_transmittedQSOProgress != CALLING){
-        on_txb6_clicked();
-        if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx6->text());
+        if (m_passiveMode) {
+          // Passive mode: don't call CQ, just keep monitoring
+          if(m_config.write_decoded_debug())
+            writeToALLTXT("Passive mode: no CQ to answer, staying in monitor mode");
+        } else {
+          on_txb6_clicked();
+          if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx6->text());
+        }
     }
   }
 //  printf("%s(%0.1f) process_Auto: %s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",m_jtdxtime->currentDateTimeUtc2().toString("hh:mm:ss.zzz").toStdString().c_str(),m_jtdxtime->GetOffset(),m_hisCall.toStdString().c_str(),hisCall.toStdString().c_str(),m_lastloggedcall.toStdString().c_str(),mode.toStdString().c_str(),m_status,prio,ui->TxFreqSpinBox->value (),m_used_freq,m_callMode,m_callPrioCQ,m_reply_other,m_reply_me,counters2);
@@ -4351,6 +4364,7 @@ void MainWindow::guiUpdate()
                 << "  AF TX/RX " << ui->TxFreqSpinBox->value () << "/" << ui->RxFreqSpinBox->value ()
                 << "Hz " << autoseq << (m_autoseq ? "-On" : "-Off") << " AutoTx" 
                 << (m_autoTx ? "-On" : "-Off") << " SShotQSO" << (m_singleshot ? "-On" : "-Off")
+                << " Passive" << (m_passiveMode ? "-On" : "-Off")
                 << " Hound mode" << (m_houndMode ? "-On" : "-Off") << " Skip Tx1" << (m_skipTx1 ? "-On" : "-Off") <<
 #if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
                  endl;
@@ -4559,7 +4573,7 @@ void MainWindow::guiUpdate()
 //Once per second:
   if(nsec != m_sec0) {
     if (m_config.watchdog() && !m_transmitting && !m_mode.startsWith ("WSPR")
-        && m_idleMinutes >= m_config.watchdog ()) {
+        && m_idleMinutes >= m_config.watchdog () && !m_passiveMode) {
       txwatchdog (true);       // switch off Enable Tx button
     }
     if(m_tune && m_config.tunetimer() && !m_tuneup) { //shall not count at WSPR band hopping
