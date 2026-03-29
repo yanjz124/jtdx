@@ -3583,8 +3583,8 @@ void MainWindow::process_Auto()
       hisCall = m_hisCall;
       grid = m_hisGrid;
       m_status = QsoHistory::NONE;
-    } else if ((m_status == QsoHistory::RCQ || m_status == QsoHistory::SCALL || (m_status == QsoHistory::SREPORT && m_skipTx1 && !m_houndMode)) && m_config.answerCQCount() &&
-        ((prio > 4 && prio < 17) || prio < 2 || m_strictdirCQ) && (m_config.nAnswerCQCounter() <= count || m_reply_other)) {
+    } else if ((m_status == QsoHistory::RCQ || m_status == QsoHistory::SCALL || (m_status == QsoHistory::SREPORT && m_skipTx1 && !m_houndMode)) && (m_config.answerCQCount() || m_passiveMode) &&
+        ((prio > 4 && prio < 17) || prio < 2 || m_strictdirCQ || m_passiveMode) && (m_config.nAnswerCQCounter() <= count || m_reply_other)) {
       {
         // Determine max retries for passive mode
         int baseMax = m_config.nAnswerCQCounter();
