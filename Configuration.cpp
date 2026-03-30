@@ -714,6 +714,8 @@ private:
   bool fmaskact_;
   bool answerCQCount_;
   bool answerInCallCount_;
+  qint32 cooldownIgnored_;
+  qint32 cooldownBusy_;
   bool sentRReportCount_;
   bool sentRR7373Count_;
   bool strictdirCQ_;
@@ -967,6 +969,8 @@ double Configuration::txDelay() const {return m_->txDelay_;}
 bool Configuration::fmaskact () const {return m_->fmaskact_;}
 bool Configuration::answerCQCount () const {return m_->answerCQCount_;}
 bool Configuration::answerInCallCount () const {return m_->answerInCallCount_;}
+qint32 Configuration::cooldownIgnored () const {return m_->cooldownIgnored_;}
+qint32 Configuration::cooldownBusy () const {return m_->cooldownBusy_;}
 bool Configuration::sentRReportCount () const {return m_->sentRReportCount_;}
 bool Configuration::sentRR7373Count () const {return m_->sentRR7373Count_;}
 bool Configuration::strictdirCQ () const {return m_->strictdirCQ_;}
@@ -1962,6 +1966,8 @@ Radio::convert_dark("#fafbfe",useDarkStyle_),Radio::convert_dark("#dcdef1",useDa
   ui_->fMask_check_box->setChecked (fmaskact_);
   ui_->answerCQCount_checkBox->setChecked (answerCQCount_);
   ui_->answerInCallCount_checkBox->setChecked (answerInCallCount_);
+  ui_->sbCooldownIgnored->setValue (cooldownIgnored_);
+  ui_->sbCooldownBusy->setValue (cooldownBusy_);
   ui_->sentRReportCount_checkBox->setChecked (sentRReportCount_);
   ui_->sentRR7373Count_checkBox->setChecked (sentRR7373Count_);
   ui_->strictDirCQ_checkBox->setChecked (strictdirCQ_);
@@ -2255,6 +2261,8 @@ void Configuration::impl::read_settings ()
   fmaskact_ = settings_->value ("FMaskDecoding", false).toBool ();
   answerCQCount_ = settings_->value ("SeqAnswerCQCount", false).toBool ();
   answerInCallCount_ = settings_->value ("SeqAnswerInCallCount", false).toBool ();
+  cooldownIgnored_ = settings_->value ("PassiveCooldownIgnored", 3).toInt (); if(!(cooldownIgnored_>=1 && cooldownIgnored_<=30)) cooldownIgnored_=3;
+  cooldownBusy_ = settings_->value ("PassiveCooldownBusy", 5).toInt (); if(!(cooldownBusy_>=1 && cooldownBusy_<=30)) cooldownBusy_=5;
   sentRReportCount_ = settings_->value ("SeqSentRReportCount", false).toBool ();
   sentRR7373Count_ = settings_->value ("SeqSentRR7373Count", false).toBool ();
   strictdirCQ_ = settings_->value ("StrictDirectionalCQ", false).toBool ();
@@ -2695,6 +2703,8 @@ void Configuration::impl::write_settings ()
   settings_->setValue ("SeqSentRR7373CounterValue", nSentRR7373Counter_);
   settings_->setValue ("FMaskDecoding", fmaskact_);
   settings_->setValue ("SeqAnswerCQCount", answerCQCount_);
+  settings_->setValue ("PassiveCooldownIgnored", cooldownIgnored_);
+  settings_->setValue ("PassiveCooldownBusy", cooldownBusy_);
   settings_->setValue ("SeqAnswerInCallCount", answerInCallCount_);
   settings_->setValue ("SeqSentRReportCount", sentRReportCount_);
   settings_->setValue ("SeqSentRR7373Count", sentRR7373Count_);
@@ -3378,6 +3388,8 @@ void Configuration::impl::accept ()
   fmaskact_ = ui_->fMask_check_box->isChecked ();
   answerCQCount_ = ui_->answerCQCount_checkBox->isChecked ();
   answerInCallCount_ = ui_->answerInCallCount_checkBox->isChecked ();
+  cooldownIgnored_ = ui_->sbCooldownIgnored->value ();
+  cooldownBusy_ = ui_->sbCooldownBusy->value ();
   sentRReportCount_ = ui_->sentRReportCount_checkBox->isChecked ();
   sentRR7373Count_ = ui_->sentRR7373Count_checkBox->isChecked ();
   strictdirCQ_ = ui_->strictDirCQ_checkBox->isChecked ();

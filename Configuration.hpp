@@ -115,6 +115,8 @@ public:
   bool fmaskact() const;
   bool answerCQCount() const;
   bool answerInCallCount() const;
+  qint32 cooldownIgnored() const;
+  qint32 cooldownBusy() const;
   bool sentRReportCount() const;
   bool sentRR7373Count() const;
   bool strictdirCQ() const;

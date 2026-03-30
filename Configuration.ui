@@ -2243,6 +2243,68 @@ both here.</string>
                </widget>
               </item>
               <item>
+               <widget class="QGroupBox" name="passiveModeGroup">
+                <property name="title">
+                 <string>Passive mode cooldown (minutes)</string>
+                </property>
+                <layout class="QHBoxLayout" name="passiveModeLayout">
+                 <item>
+                  <widget class="QLabel" name="labelCooldownIgnored">
+                   <property name="text">
+                    <string>Station ignoring us:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QSpinBox" name="sbCooldownIgnored">
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>30</number>
+                   </property>
+                   <property name="value">
+                    <number>3</number>
+                   </property>
+                   <property name="suffix">
+                    <string> min</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QLabel" name="labelCooldownBusy">
+                   <property name="text">
+                    <string>Station busy with others:</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <widget class="QSpinBox" name="sbCooldownBusy">
+                   <property name="minimum">
+                    <number>1</number>
+                   </property>
+                   <property name="maximum">
+                    <number>30</number>
+                   </property>
+                   <property name="value">
+                    <number>5</number>
+                   </property>
+                   <property name="suffix">
+                    <string> min</string>
+                   </property>
+                  </widget>
+                 </item>
+                 <item>
+                  <spacer name="passiveModeSpacer">
+                   <property name="orientation">
+                    <enum>Qt::Horizontal</enum>
+                   </property>
+                  </spacer>
+                 </item>
+                </layout>
+               </widget>
+              </item>
+              <item>
                <layout class="QHBoxLayout" name="horizontalLayout_27">
                 <item>
                  <layout class="QGridLayout" name="gridLayout_33">

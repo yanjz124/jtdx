@@ -3102,10 +3102,10 @@ void MainWindow::on_skipCallButton_clicked()
     // Don't call clearDX() as that switches to CQ mode and can cut TX
     // Just clear the DX fields and let process_Auto handle the rest
     QString skippedCall = m_hisCall;
-    m_passiveCooldown.insert(Radio::base_callsign(skippedCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
-    update_autoseq_status(tr("Skipping %1 after this TX → cooldown 3m").arg(skippedCall));
+    m_passiveCooldown.insert(Radio::base_callsign(skippedCall), m_jtdxtime->currentMSecsSinceEpoch2() + m_config.cooldownIgnored() * 60000);
+    update_autoseq_status(tr("Skipping %1 after this TX → cooldown %2m").arg(skippedCall).arg(m_config.cooldownIgnored()));
     if(m_config.write_decoded_debug())
-      writeToALLTXT("Manual skip: " + skippedCall + ", cooldown 3min");
+      writeToALLTXT("Manual skip: " + skippedCall + ", cooldown " + QString::number(m_config.cooldownIgnored()) + "min");
     m_qsoHistory.reset_count(skippedCall);
     // Just clear the call/grid fields - don't change TX state
     clearDXfields(" cleared, manual skip");
@@ -3616,15 +3616,15 @@ void MainWindow::process_Auto()
         } else {
           // Give up - max retries reached
           if (m_passiveMode && !m_reply_other) {
-            m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 180000);
-            update_autoseq_status(tr("%1 no reply after %2 tries → cooldown 3m").arg(hisCall).arg(count));
+            m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + m_config.cooldownIgnored() * 60000);
+            update_autoseq_status(tr("%1 no reply after %2 tries → cooldown %3m").arg(hisCall).arg(count).arg(m_config.cooldownIgnored()));
             if(m_config.write_decoded_debug())
-              writeToALLTXT("Passive mode: " + hisCall + " not responding, cooldown 3min");
+              writeToALLTXT("Passive mode: " + hisCall + " not responding, cooldown " + QString::number(m_config.cooldownIgnored()) + "min");
           } else if (m_passiveMode) {
-            m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + 300000);
-            update_autoseq_status(tr("%1 never answered after %2 tries → cooldown 5m").arg(hisCall).arg(count));
+            m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + m_config.cooldownBusy() * 60000);
+            update_autoseq_status(tr("%1 never answered after %2 tries → cooldown %3m").arg(hisCall).arg(count).arg(m_config.cooldownBusy()));
             if(m_config.write_decoded_debug())
-              writeToALLTXT("Passive mode: " + hisCall + " never answered us, cooldown 5min");
+              writeToALLTXT("Passive mode: " + hisCall + " never answered us, cooldown " + QString::number(m_config.cooldownBusy()) + "min");
           }
           clearDX (" cleared, RCQ/SCALL/SREPORT count reached");
           if (m_reply_other)
