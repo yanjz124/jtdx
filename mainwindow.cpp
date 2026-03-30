@@ -2249,8 +2249,14 @@ void MainWindow::on_enableTxButton_clicked (bool checked)
   }
 }
 
-void MainWindow::enableTx_mode (bool state) { ui->enableTxButton->setChecked (state); on_enableTxButton_clicked (state); }
-void MainWindow::enableTxButton_off () { enableTx_mode (false); }
+void MainWindow::enableTx_mode (bool state) {
+  if (m_passiveMode && !state && m_config.write_decoded_debug()) {
+    // Log a stack trace hint so we can find who's disabling Enable TX
+    writeToALLTXT("Passive mode: Enable TX being set to OFF");
+  }
+  ui->enableTxButton->setChecked (state); on_enableTxButton_clicked (state);
+}
+void MainWindow::enableTxButton_off () { if(m_passiveMode && m_config.write_decoded_debug()) writeToALLTXT("EnableTx OFF by: enableTxButton_off timer (73 disable)"); enableTx_mode (false); }
 
 void MainWindow::keyPressEvent( QKeyEvent *e )                //keyPressEvent
 {
@@ -4395,7 +4401,7 @@ void MainWindow::guiUpdate()
     if ((f_from >0 and (onAirFreq > f_from and onAirFreq < f_to) and m_mode.left(4)!="WSPR") || (m_houndTXfreqJumps &&  ui->TxFreqSpinBox->value() < 1000 && ui->txrb1->isChecked())) {
       m_bTxTime=false;
 //      if (m_tune) stop_tuning ();
-      if (m_enableTx) enableTx_mode (false);
+      if (m_enableTx) { if(m_passiveMode && m_config.write_decoded_debug()) writeToALLTXT("EnableTx OFF by: WSPR guard band"); enableTx_mode (false); }
       if(onAirFreq!=onAirFreq0) {
         onAirFreq0=onAirFreq;
         if (onAirFreq > f_from and onAirFreq < f_to) {
@@ -4894,7 +4900,7 @@ void MainWindow::set_scheduler(QString const& setto,bool mixed)
   m_wideGraph->setRxBand (m_config.bands ()->find (frq));
 }
 
-void MainWindow::haltTx(QString reason) { m_haltTxWritten=true; writeHaltTxEvent(reason); on_stopTxButton_clicked(); }
+void MainWindow::haltTx(QString reason) { if(m_passiveMode && m_config.write_decoded_debug()) writeToALLTXT("haltTx called: " + reason); m_haltTxWritten=true; writeHaltTxEvent(reason); on_stopTxButton_clicked(); }
 
 void MainWindow::haltTxTuneTimer()
 {
@@ -6766,6 +6772,7 @@ void MainWindow::band_changed (Frequency f)
         // disable auto Tx if "blind" QSY outside of waterfall
 //        ui->stopTxButton->click (); // halt any transmission
         if(m_transmitting || g_iptt==1) haltTx("band changed ");
+        if(m_passiveMode && m_config.write_decoded_debug()) writeToALLTXT("EnableTx OFF by: band change outside waterfall");
         enableTx_mode (false);       // switch off Enable Tx button
       }
     }
@@ -7121,7 +7128,7 @@ void MainWindow::on_stopTxButton_clicked()                    //Stop Tx
 {
   if (m_transmitting || m_tune) m_addtx = -1;
   if (m_tune) stop_tuning ();
-  if (m_enableTx and !m_tuneup) enableTx_mode (false);
+  if (m_enableTx and !m_tuneup) { if(m_passiveMode && m_config.write_decoded_debug()) writeToALLTXT("EnableTx OFF by: Stop button"); enableTx_mode (false); }
   m_btxok=false;
   m_nlasttx=0;
 //  if(m_autofilter && m_autoseq && m_filter) autoFilter (false);
@@ -8220,7 +8227,7 @@ void MainWindow::txwatchdog (bool triggered)
   if (triggered)
     {
       m_bTxTime=false;
-      if (m_enableTx) enableTx_mode (false);
+      if (m_enableTx) { if(m_passiveMode && m_config.write_decoded_debug()) writeToALLTXT("EnableTx OFF by: TX watchdog"); enableTx_mode (false); }
       tx_status_label->setStyleSheet (QString("QLabel{background: %1}").arg(Radio::convert_dark("#ff8080",m_useDarkStyle)));
       tx_status_label->setText (tr("Tx watchdog expired"));
     }
