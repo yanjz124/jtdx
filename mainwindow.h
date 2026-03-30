@@ -571,6 +571,7 @@ private:
   bool m_passiveMode;
   QHash<QString, qint64> m_passiveCooldown;  // callsign -> cooldown expiry timestamp (ms)
   bool m_passiveTxUserDisabled;  // user manually turned off Enable TX in passive mode
+  bool m_programmaticEnableTx;   // true when enableTx_mode() is calling, not user click
   QProcess * m_webServerProcess;
   bool m_autofilter;
   bool m_houndMode;

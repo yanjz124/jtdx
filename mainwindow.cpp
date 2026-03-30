@@ -300,6 +300,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   m_singleshot {false},
   m_passiveMode {false},
   m_passiveTxUserDisabled {false},
+  m_programmaticEnableTx {false},
   m_webServerProcess {nullptr},
   m_autofilter {false},
   m_houndMode {false},
@@ -2231,8 +2232,10 @@ void MainWindow::on_enableTxButton_clicked (bool checked)
   if(m_enableTx && !checked && m_curMsgTx.startsWith(m_hisCall+" ")) m_lasthint=true;
   if(checked && m_lasthint) m_lasthint=false;
   m_enableTx = checked;
-  // Track user intent for passive mode auto-re-enable
-  if (m_passiveMode) m_passiveTxUserDisabled = !checked;
+  // Track user intent for passive mode - only real user clicks set this flag
+  if (m_passiveMode && !m_programmaticEnableTx) {
+    m_passiveTxUserDisabled = !checked;
+  }
   statusUpdate ();
   if(m_mode.left(4)=="WSPR")  {
     QPalette palette {ui->sbTxPercent->palette ()};
@@ -2251,10 +2254,11 @@ void MainWindow::on_enableTxButton_clicked (bool checked)
 
 void MainWindow::enableTx_mode (bool state) {
   if (m_passiveMode && !state && m_config.write_decoded_debug()) {
-    // Log a stack trace hint so we can find who's disabling Enable TX
-    writeToALLTXT("Passive mode: Enable TX being set to OFF");
+    writeToALLTXT("Passive mode: Enable TX being set to OFF (programmatic)");
   }
+  m_programmaticEnableTx = true;
   ui->enableTxButton->setChecked (state); on_enableTxButton_clicked (state);
+  m_programmaticEnableTx = false;
 }
 void MainWindow::enableTxButton_off () { if(m_passiveMode && m_config.write_decoded_debug()) writeToALLTXT("EnableTx OFF by: enableTxButton_off timer (73 disable)"); enableTx_mode (false); }
 
