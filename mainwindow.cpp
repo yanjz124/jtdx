@@ -3092,7 +3092,13 @@ void MainWindow::on_actionSingleShot_toggled(bool checked)
 void MainWindow::on_actionPassiveMode_toggled(bool checked)
 {
   m_passiveMode=checked;
+  m_passiveTxUserDisabled=false;  // reset user-disabled flag
   setAutoSeqButtonStyle(m_autoseq);
+  if (checked && !m_enableTx) {
+    // Auto-enable TX when passive mode is turned on
+    enableTx_mode(true);
+    txwatchdog(false);
+  }
 }
 
 void MainWindow::on_skipCallButton_clicked()
