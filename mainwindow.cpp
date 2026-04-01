@@ -3853,8 +3853,8 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::SRR73: {
-        if (m_passiveMode) {
-          clearDXfields(" cleared, SRR73 in passive mode");
+        if (m_passiveMode || (m_autoseq && m_callMode > 0)) {
+          clearDXfields(" cleared, SRR73");
           m_bTxTime = false;
         } else if (!m_singleshot && !m_config.autolog() && m_lastloggedcall == m_hisCall)
           autoStopTx("SRR73, none received ");
@@ -3866,8 +3866,8 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::S73: {
-        if (m_passiveMode) {
-          clearDXfields(" cleared, S73 in passive mode");
+        if (m_passiveMode || (m_autoseq && m_callMode > 0)) {
+          clearDXfields(" cleared, S73");
           m_bTxTime = false;
         } else {
           autoStopTx("S73, none received ");
@@ -3876,11 +3876,11 @@ void MainWindow::process_Auto()
       }
       case QsoHistory::FIN: {
         update_autoseq_status(tr("QSO complete with %1").arg(m_hisCall));
-        if (m_passiveMode) {
-          // Passive mode: don't disable Enable TX after QSO, just clear DX and keep monitoring
+        if (m_passiveMode || (m_autoseq && m_callMode > 0)) {
+          // AutoSeq active: don't disable Enable TX after QSO, let watchdog handle timeout
           if(m_config.write_decoded_debug())
-            writeToALLTXT("Passive mode: QSO finished, staying active");
-          clearDXfields(" cleared, QSO finished in passive mode");
+            writeToALLTXT("QSO finished, keeping Enable TX on (AutoSeq active)");
+          clearDXfields(" cleared, QSO finished");
           m_bTxTime = false;
         } else if (m_singleshot)
           autoStopTx("FIN, end of QSO, Singleshot ");
