@@ -3647,7 +3647,7 @@ void MainWindow::process_Auto()
             counters = false;
         }
       }
-    } else if ((m_status == QsoHistory::RCALL || (m_status == QsoHistory::SREPORT && !m_skipTx1)) && m_config.answerInCallCount() && 
+    } else if ((m_status == QsoHistory::RCALL || (m_status == QsoHistory::SREPORT && !m_skipTx1)) && (m_config.answerInCallCount() || (m_autoseq && m_callMode > 0)) &&
         (m_config.nAnswerInCallCounter() <= count || m_reply_other)) {
       clearDX (" cleared, RCALL/SREPORT count reached");
       m_qsoHistory.calllist(hisCall,rpt.toInt(),time);
@@ -3658,7 +3658,7 @@ void MainWindow::process_Auto()
       counters2 = false;
       if (m_singleshot)
         counters = false;
-    } else if ((m_status == QsoHistory::RREPORT || m_status == QsoHistory::SRREPORT) && m_config.sentRReportCount() && 
+    } else if ((m_status == QsoHistory::RREPORT || m_status == QsoHistory::SRREPORT) && (m_config.sentRReportCount() || (m_autoseq && m_callMode > 0)) &&
         m_config.nSentRReportCounter() <= count) {
       clearDX (" cleared, RREPORT/SRREPORT count reached");
       count = m_qsoHistory.reset_count(hisCall);
@@ -3668,8 +3668,8 @@ void MainWindow::process_Auto()
       counters2 = false;
       if (m_singleshot)
         counters = false;
-    } else if ((m_status == QsoHistory::RRR || m_status == QsoHistory::RRR73 || m_status == QsoHistory::R73 || m_status == QsoHistory::SRR73 || m_status == QsoHistory::S73) && 
-        m_config.sentRR7373Count() && m_config.nSentRR7373Counter() <= count) {
+    } else if ((m_status == QsoHistory::RRR || m_status == QsoHistory::RRR73 || m_status == QsoHistory::R73 || m_status == QsoHistory::SRR73 || m_status == QsoHistory::S73) &&
+        (m_config.sentRR7373Count() || (m_autoseq && m_callMode > 0)) && m_config.nSentRR7373Counter() <= count) {
       clearDX (" cleared, RRR|RR73|R73 count reached");
       count = m_qsoHistory.reset_count(hisCall);
       hisCall = m_hisCall;
