@@ -3841,7 +3841,14 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::RRR73: {
-        if(!m_houndMode) { on_txb5_clicked(); if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx5->currentText()); }
+        if (m_autoseq && m_callMode > 0 && !m_houndMode) {
+          // Other station sent RR73 — QSO is done, move on
+          update_autoseq_status(tr("%1 sent RR73 — QSO complete").arg(m_hisCall));
+          if(m_config.write_decoded_debug())
+            writeToALLTXT("RR73 received from " + m_hisCall + ", QSO complete, moving on");
+          clearDXfields(" cleared, RR73 received");
+          m_bTxTime = false;
+        } else if(!m_houndMode) { on_txb5_clicked(); if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx5->currentText()); }
         else { 
           auto curtime=m_jtdxtime->currentDateTimeUtc2();
           if(m_lastloggedcall!=m_hisCall || qAbs(curtime.toMSecsSinceEpoch()-m_lastloggedtime.toMSecsSinceEpoch()) > int(m_TRperiod) * 7000) {
@@ -3861,8 +3868,17 @@ void MainWindow::process_Auto()
         break;
       }
       case QsoHistory::R73: {
-        on_txb5_clicked();
-        if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx5->currentText());
+        if (m_autoseq && m_callMode > 0) {
+          // Other station sent 73 — QSO is done, move on
+          update_autoseq_status(tr("%1 sent 73 — QSO complete").arg(m_hisCall));
+          if(m_config.write_decoded_debug())
+            writeToALLTXT("R73 received from " + m_hisCall + ", QSO complete, moving on");
+          clearDXfields(" cleared, R73 received");
+          m_bTxTime = false;
+        } else {
+          on_txb5_clicked();
+          if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx5->currentText());
+        }
         break;
       }
       case QsoHistory::S73: {
