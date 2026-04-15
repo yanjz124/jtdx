@@ -5,6 +5,12 @@
 
 #include <cstring>
 #include <cmath>
+#ifdef _WIN32
+#  include <windows.h>
+#  include <io.h>
+#else
+#  include <unistd.h>
+#endif
 
 #include <QByteArray>
 #include <QString>
@@ -1389,6 +1395,51 @@ void HamlibTransceiver::do_ptt (bool on)
     }
 
   update_PTT (on);
+}
+
+void HamlibTransceiver::tune_atu () noexcept
+{
+  if (is_dummy_ || !rig_) return;
+  // Try Hamlib's RIG_FUNC_TUNER first (works on rigs where backend implements it).
+  int rc = rig_set_func (rig_.data (), RIG_VFO_CURR, RIG_FUNC_TUNER, 1);
+  if (rc == RIG_OK)
+    {
+      qDebug () << "HamlibTransceiver::tune_atu: rig_set_func(RIG_FUNC_TUNER) OK";
+      return;
+    }
+  qDebug () << "HamlibTransceiver::tune_atu: rig_set_func failed rc=" << rc << ", trying raw SWT20; fallback";
+  // Fallback: write Elecraft SWT20; (short press ATU key) directly to the open serial port.
+  // This is a fire-and-forget command; KX2/KX3/K3 accept it.
+  char const cmd[] = "SWT20;";
+  int fd = rig_->state.rigport.fd;
+  if (fd < 0)
+    {
+      qWarning () << "HamlibTransceiver::tune_atu: no serial fd available";
+      return;
+    }
+#ifdef _WIN32
+  HANDLE h = reinterpret_cast<HANDLE> (_get_osfhandle (fd));
+  if (h == INVALID_HANDLE_VALUE)
+    {
+      qWarning () << "HamlibTransceiver::tune_atu: invalid HANDLE";
+      return;
+    }
+  DWORD written = 0;
+  if (!WriteFile (h, cmd, sizeof (cmd) - 1, &written, nullptr))
+    {
+      qWarning () << "HamlibTransceiver::tune_atu: WriteFile failed, err=" << GetLastError ();
+      return;
+    }
+  FlushFileBuffers (h);
+#else
+  ssize_t n = ::write (fd, cmd, sizeof (cmd) - 1);
+  if (n < 0)
+    {
+      qWarning () << "HamlibTransceiver::tune_atu: write failed";
+      return;
+    }
+#endif
+  qDebug () << "HamlibTransceiver::tune_atu: SWT20; sent via raw write";
 }
 
 void HamlibTransceiver::set_conf (char const * item, char const * value)

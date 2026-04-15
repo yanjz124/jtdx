@@ -1642,6 +1642,16 @@ or bandwidth is selected).</string>
             </spacer>
            </item>
            <item>
+            <widget class="QCheckBox" name="checkBoxATUTuneOnBandChange">
+             <property name="toolTip">
+              <string>Trigger rig ATU tune cycle when band changes (Hamlib rigs that support RIG_FUNC_TUNER, e.g. Elecraft KX2/KX3/K3). Sends a short ATU button press via CAT.</string>
+             </property>
+             <property name="text">
+              <string>ATU tune on band change</string>
+             </property>
+            </widget>
+           </item>
+           <item>
             <widget class="QPushButton" name="test_PTT_push_button">
              <property name="toolTip">
               <string>Attempt to activate the transmitter.

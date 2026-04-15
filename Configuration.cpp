@@ -371,6 +371,8 @@ public:
   void transceiver_ft4_mode (bool);
   void transceiver_audio (bool);
   void transceiver_tune (bool);
+  void transceiver_tune_atu ();
+  bool atu_tune_on_band_change_;
   void transceiver_period (double);
   void transceiver_blocksize (qint32);
   void transceiver_modulator_start (unsigned, double, double, double, bool, double, double);
@@ -549,6 +551,7 @@ private:
   Q_SIGNAL void start_transceiver (unsigned seqeunce_number,JTDXDateTime * jtdxtime) const;
   Q_SIGNAL void set_transceiver (Transceiver::TransceiverState const&,
                                  unsigned sequence_number) const;
+  Q_SIGNAL void tune_atu_transceiver () const;
   Q_SIGNAL void stop_transceiver () const;
 
   Configuration * const self_;	// back pointer to public interface
@@ -1217,6 +1220,13 @@ void Configuration::transceiver_tune (bool on)
 
   m_->transceiver_tune (on);
 }
+
+void Configuration::transceiver_tune_atu ()
+{
+  m_->transceiver_tune_atu ();
+}
+
+bool Configuration::atu_tune_on_band_change () const {return m_->atu_tune_on_band_change_;}
 
 void Configuration::transceiver_period (double period)
 {
@@ -2107,7 +2117,8 @@ Radio::convert_dark("#fafbfe",useDarkStyle_),Radio::convert_dark("#dcdef1",useDa
   ui_->CAT_stop_bits_button_group->button (rig_params_.stop_bits)->setChecked (true);
   ui_->CAT_handshake_button_group->button (rig_params_.handshake)->setChecked (true);
   ui_->checkBoxPwrBandTxMemory->setChecked(pwrBandTxMemory_);
-  ui_->checkBoxPwrBandTuneMemory->setChecked(pwrBandTuneMemory_);  
+  ui_->checkBoxPwrBandTuneMemory->setChecked(pwrBandTuneMemory_);
+  ui_->checkBoxATUTuneOnBandChange->setChecked(atu_tune_on_band_change_);
   if (rig_params_.force_dtr)
     {
       ui_->force_DTR_combo_box->setCurrentIndex (rig_params_.dtr_high ? 1 : 2);
@@ -2582,6 +2593,7 @@ void Configuration::impl::read_settings ()
   scroll_ = settings_->value ("Scroll", false).toBool ();
   watchdog_ = settings_->value ("TxWatchdogTimer", 6).toInt (); if(!(watchdog_>=0 && watchdog_<=99)) watchdog_=6;
   tunetimer_ = settings_->value ("TuneTimer", 30).toInt (); if(!(tunetimer_>=0 && tunetimer_<=300)) tunetimer_=30;
+  atu_tune_on_band_change_ = settings_->value ("ATUTuneOnBandChange", false).toBool ();
   TX_messages_ = settings_->value ("Tx2QSO", true).toBool ();
   hide_TX_messages_ = settings_->value ("HideTxMessages", true).toBool ();
   decode_at_52s_ = settings_->value("Decode52",false).toBool ();
@@ -2860,6 +2872,7 @@ void Configuration::impl::write_settings ()
   settings_->setValue ("Scroll", scroll_);
   settings_->setValue ("TxWatchdogTimer", watchdog_);
   settings_->setValue ("TuneTimer", tunetimer_);
+  settings_->setValue ("ATUTuneOnBandChange", atu_tune_on_band_change_);
   settings_->setValue ("Tx2QSO", TX_messages_);
   settings_->setValue ("HideTxMessages", hide_TX_messages_);
   settings_->setValue ("CATForceDTR", rig_params_.force_dtr);
@@ -3482,7 +3495,8 @@ void Configuration::impl::accept ()
   frequency_calibration_intercept_ = ui_->calibration_intercept_spin_box->value ();
   frequency_calibration_slope_ppm_ = ui_->calibration_slope_ppm_spin_box->value ();
   pwrBandTxMemory_ = ui_->checkBoxPwrBandTxMemory->isChecked ();
-  pwrBandTuneMemory_ = ui_->checkBoxPwrBandTuneMemory->isChecked ();  
+  pwrBandTuneMemory_ = ui_->checkBoxPwrBandTuneMemory->isChecked ();
+  atu_tune_on_band_change_ = ui_->checkBoxATUTuneOnBandChange->isChecked ();  
 
   auto new_server = ui_->udp_server_line_edit->text ();
   if (new_server != udp_server_name_)
@@ -5749,6 +5763,7 @@ bool Configuration::impl::open_rig (bool force)
           // setup thread safe startup and close down semantics
           rig_connections_ << connect (this, &Configuration::impl::start_transceiver, rig.get (), &Transceiver::start);
           rig_connections_ << connect (this, &Configuration::impl::stop_transceiver, rig.get (), &Transceiver::stop);
+          rig_connections_ << connect (this, &Configuration::impl::tune_atu_transceiver, rig.get (), &Transceiver::tune_atu);
 
           auto p = rig.release ();	// take ownership
 
@@ -5907,6 +5922,11 @@ void Configuration::impl::transceiver_tune (bool on)
 //    printf("%s(%0.1f) Configuration #:%d tune: %d\n",jtdxtime_->currentDateTimeUtc2().toString("hh:mm:ss.zzz").toStdString().c_str(),jtdxtime_->GetOffset(),transceiver_command_number_+1,on);
     Q_EMIT set_transceiver (cached_rig_state_, ++transceiver_command_number_);
   }
+}
+
+void Configuration::impl::transceiver_tune_atu ()
+{
+  Q_EMIT tune_atu_transceiver ();
 }
 
 void Configuration::impl::transceiver_period (double period)

@@ -42,6 +42,10 @@ class HamlibTransceiver final
   void do_mode (MODE) override;
   void do_ptt (bool) override;
 
+ public:
+  void tune_atu () noexcept override;
+
+ private:
   void do_poll () override;
 
   void error_check (int ret_code, QString const& doing) const;

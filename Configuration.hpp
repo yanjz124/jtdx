@@ -333,6 +333,12 @@ public:
   //
   Q_SLOT void transceiver_tune (bool = false);
 
+  // Trigger rig ATU tune cycle (Hamlib only, short ATU button press).
+  Q_SLOT void transceiver_tune_atu ();
+
+  // Whether to auto-tune ATU when band changes.
+  bool atu_tune_on_band_change () const;
+
   // Set period for TCI audio
   //
   Q_SLOT void transceiver_period (double = 15.0);

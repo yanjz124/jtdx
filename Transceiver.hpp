@@ -212,6 +212,10 @@ public:
   Q_SLOT virtual void start (unsigned sequence_number,JTDXDateTime* jtdxtime) noexcept = 0;
   Q_SLOT virtual void stop () noexcept = 0;
 
+  // Trigger rig ATU tune cycle (KX2/K3/KX3: short ATU button press).
+  // Default no-op; HamlibTransceiver overrides.
+  Q_SLOT virtual void tune_atu () noexcept {}
+
   //
   // asynchronous status updates
   //

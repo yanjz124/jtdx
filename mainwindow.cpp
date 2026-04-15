@@ -3099,6 +3099,14 @@ void MainWindow::on_actionPassiveMode_toggled(bool checked)
     enableTx_mode(true);
     txwatchdog(false);
   }
+  if (!checked) {
+    // Turning off passive mode: clear cooldowns and ensure TX is usable
+    m_passiveCooldown.clear();
+    if (!m_enableTx && !m_tune) {
+      enableTx_mode(true);
+      txwatchdog(false);
+    }
+  }
 }
 
 void MainWindow::on_skipCallButton_clicked()
@@ -3118,6 +3126,22 @@ void MainWindow::on_skipCallButton_clicked()
     // Reset counter so CQ search runs immediately on next cycle
     m_counter = 0;
   }
+}
+
+void MainWindow::on_atuButton_clicked()
+{
+  if (!m_rigOk || m_config.rig_name().startsWith("None")) {
+    update_autoseq_status(tr("ATU: no rig connected"));
+    return;
+  }
+  if (m_transmitting) {
+    update_autoseq_status(tr("ATU: skipped (transmitting)"));
+    return;
+  }
+  if(m_config.write_decoded_debug())
+    writeToALLTXT("ATU: manual tune triggered from button");
+  update_autoseq_status(tr("ATU: triggering rig tune cycle"));
+  m_config.transceiver_tune_atu();
 }
 
 void MainWindow::on_webGuiButton_clicked(bool checked)
@@ -3848,6 +3872,8 @@ void MainWindow::process_Auto()
             writeToALLTXT("RR73 received from " + m_hisCall + ", QSO complete, moving on");
           clearDXfields(" cleared, RR73 received");
           m_bTxTime = false;
+          m_ntx = 6; m_nlasttx = 6; m_QSOProgress = CALLING;
+          ui->txrb6->setChecked(true);
         } else if(!m_houndMode) { on_txb5_clicked(); if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx5->currentText()); }
         else { 
           auto curtime=m_jtdxtime->currentDateTimeUtc2();
@@ -3863,6 +3889,8 @@ void MainWindow::process_Auto()
         if (m_passiveMode || (m_autoseq && m_callMode > 0)) {
           clearDXfields(" cleared, SRR73");
           m_bTxTime = false;
+          m_ntx = 6; m_nlasttx = 6; m_QSOProgress = CALLING;
+          ui->txrb6->setChecked(true);
         } else if (!m_singleshot && !m_config.autolog() && m_lastloggedcall == m_hisCall)
           autoStopTx("SRR73, none received ");
         break;
@@ -3875,6 +3903,8 @@ void MainWindow::process_Auto()
             writeToALLTXT("R73 received from " + m_hisCall + ", QSO complete, moving on");
           clearDXfields(" cleared, R73 received");
           m_bTxTime = false;
+          m_ntx = 6; m_nlasttx = 6; m_QSOProgress = CALLING;
+          ui->txrb6->setChecked(true);
         } else {
           on_txb5_clicked();
           if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx5->currentText());
@@ -3885,6 +3915,8 @@ void MainWindow::process_Auto()
         if (m_passiveMode || (m_autoseq && m_callMode > 0)) {
           clearDXfields(" cleared, S73");
           m_bTxTime = false;
+          m_ntx = 6; m_nlasttx = 6; m_QSOProgress = CALLING;
+          ui->txrb6->setChecked(true);
         } else {
           autoStopTx("S73, none received ");
         }
@@ -4079,6 +4111,34 @@ void MainWindow::readFromStdout()                             //readFromStdout
       QString deCall="";
       QString grid="";
       decodedtext.deCallAndGrid(/*out*/deCall,grid);
+      // Cooldown breakthrough: if a station on cooldown is calling us directly,
+      // remove from cooldown and switch to them — top priority unless we're
+      // in an active QSO where the other station has already responded to us
+      bool cooldownBreakthrough = false;
+      if (mycallinmsg && !deCall.isEmpty() && m_passiveMode && m_autoseq &&
+          m_passiveCooldown.contains(Radio::base_callsign(deCall)) &&
+          (m_hisCall.isEmpty() || Radio::base_callsign(deCall) != Radio::base_callsign(m_hisCall))) {
+        bool inActiveReplyQSO = !m_hisCall.isEmpty() && m_status >= QsoHistory::RREPORT && m_status < QsoHistory::FIN;
+        if (!inActiveReplyQSO) {
+          m_passiveCooldown.remove(Radio::base_callsign(deCall));
+          if(m_config.write_decoded_debug())
+            writeToALLTXT("Cooldown breakthrough: " + deCall + " is calling us! Removing from cooldown and switching");
+          update_autoseq_status(tr("%1 calling us! Left cooldown → responding").arg(deCall));
+          if (!m_hisCall.isEmpty()) {
+            clearDX(" cleared for cooldown breakthrough from " + deCall);
+          } else {
+            genStdMsgs(QString {});
+          }
+          ui->dxCallEntry->setText(deCall);
+          ui->RxFreqSpinBox->setValue(decodedtext.frequencyOffset());
+          m_rpt = "-60";  // force genStdMsgs to regenerate in process_Auto
+          cooldownBreakthrough = true;
+          m_processAuto_done = false;  // allow process_Auto to run for the new call
+        } else {
+          if(m_config.write_decoded_debug())
+            writeToALLTXT("Cooldown breakthrough blocked: " + deCall + " calling us but in active QSO with " + m_hisCall);
+        }
+      }
       if (!m_hisCall.isEmpty() && !deCall.isEmpty() && Radio::base_callsign (m_hisCall) == Radio::base_callsign (deCall)) ui->RxFreqSpinBox->setValue (decodedtext.frequencyOffset());
       if (!deCall.isEmpty() && !m_reply_me && Radio::base_callsign (deCall) == Radio::base_callsign (m_hisCall)) {
           if (mycallinmsg) {
@@ -4141,7 +4201,7 @@ void MainWindow::readFromStdout()                             //readFromStdout
 	    if (!dxbasecall.isEmpty () && message_words.at (2).contains (dxbasecall) && message_words.at (3).contains ("73")) bdxcall73 = true;
 	  }
 	  
-      if (qAbs(decodedtext.frequencyOffset() - m_wideGraph->rxFreq()) <= 10 || (m_showMyCallMsgRxWindow && mycallinmsg) || bcontent || bdxcall73 || (m_showWantedCallRxWindow && notified & 8)) {
+      if (qAbs(decodedtext.frequencyOffset() - m_wideGraph->rxFreq()) <= 10 || (m_showMyCallMsgRxWindow && mycallinmsg) || bcontent || bdxcall73 || (m_showWantedCallRxWindow && notified & 8) || cooldownBreakthrough) {
 
         if(m_bypassRxfFilters || dec_data.params.nagain==1 || dec_data.params.nagainfil==1) 
 			bypassRxfFilters = true;
@@ -6830,10 +6890,19 @@ void MainWindow::band_changed (Frequency f)
       m_nsecBandChanged=nseqmod;
     }
 
+    auto const& newband2 = m_config.bands ()->find (f);
+    auto const& oldband2 = m_config.bands ()->find (m_lastMonitoredFrequency);
+    bool actualBandChange = (oldband2 != newband2);
     m_freqNominal = f;
     m_freqTxNominal = m_freqNominal;
     setRig ();
     setXIT (ui->TxFreqSpinBox->value ());
+    if (actualBandChange && m_config.atu_tune_on_band_change () && m_rigOk
+        && !m_transmitting && !m_config.rig_name().startsWith("None")) {
+      if(m_config.write_decoded_debug())
+        writeToALLTXT("ATU: triggering rig tune cycle on band change");
+      m_config.transceiver_tune_atu ();
+    }
     qint64 fDelta = m_lastDisplayFreq - m_freqNominal;
     if (ui->outAttenuation->value() == 1 && m_outAttenuation != 1 ) {ui->outAttenuation->setValue (m_outAttenuation); m_outAttenuation = 1;}
     if (qAbs(fDelta)>1000000) {
