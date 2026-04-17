@@ -3596,6 +3596,29 @@ void MainWindow::process_Auto()
   if (!hisCall.isEmpty ()) {
     if (m_houndMode) count = -1; //marker for changing status to FIN when status is RRR73
     m_status = m_qsoHistory.autoseq(hisCall,grid,rpt,rx,tx,time,count,prio,mode);
+    // Staleness give-up: in passive mode, if we're still just calling the station
+    // (they haven't sent us a report yet) and we haven't heard ANY activity from
+    // them in the last 2 decode cycles, give up early and add to cooldown.
+    // Prevents burning retries on stations that QSYed or went silent.
+    if (m_passiveMode && !m_houndMode && m_status > QsoHistory::NONE && m_status < QsoHistory::RREPORT) {
+      unsigned latest = m_qsoHistory.latest_time();
+      unsigned lastHeard = m_qsoHistory.last_heard(hisCall);
+      unsigned trPeriod = m_mode == "FT4" ? 8 : (m_mode == "FT8" ? 15 : 60);
+      unsigned staleThreshold = 2 * trPeriod;
+      // handle day-wrap: times are seconds-of-day 0..86399
+      unsigned gap = (latest >= lastHeard) ? (latest - lastHeard) : (latest + 86400 - lastHeard);
+      if (lastHeard > 0 && gap > staleThreshold) {
+        m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + m_config.cooldownIgnored() * 60000);
+        update_autoseq_status(tr("%1 gone silent (%2s) → cooldown %3m").arg(hisCall).arg(gap).arg(m_config.cooldownIgnored()));
+        if(m_config.write_decoded_debug())
+          writeToALLTXT("Passive mode: " + hisCall + " stale (gap=" + QString::number(gap) + "s > " + QString::number(staleThreshold) + "s), cooldown " + QString::number(m_config.cooldownIgnored()) + "min");
+        m_qsoHistory.reset_count(hisCall);
+        clearDX(" cleared, station went silent");
+        hisCall = m_hisCall;
+        grid = m_hisGrid;
+        m_status = QsoHistory::NONE;
+      }
+    }
     if (m_transmitting) count -=1;
     if(m_config.write_decoded_debug()) {
       QString StrDirection = "";

@@ -27,6 +27,8 @@ class QsoHistory
 	Status status(QString const& callsign, QString &grid);
 	Status autoseq(QString &callsign, QString &grid, QString &rep, int &rx, int &tx, unsigned &time, int &count, int &prio, QString &mode);
 	Status log_data(QString const& callsign, unsigned &time, QString &rrep, QString &srep);
+	unsigned last_heard(QString const& callsign) const; // time in sec-of-day when station was last decoded; 0 if unknown
+	unsigned latest_time() const { return max_r_time; }
 	int remove(QString const& callsign);		
 	int blacklist(QString const& callsign);
 	void calllist(QString const& callsign,int level, unsigned time);

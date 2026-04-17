@@ -350,6 +350,14 @@ void QsoHistory::time(unsigned time)
     }
 }
 
+unsigned QsoHistory::last_heard(QString const& callsign) const
+{
+    if (!_working || callsign.length() < 3) return 0;
+    auto it = _data.find (Radio::base_callsign (callsign));
+    if (it == _data.end ()) return 0;
+    return it.value ().time;
+}
+
 QsoHistory::Status QsoHistory::status(QString const& callsign, QString &grid)
 {
     if (_working)
