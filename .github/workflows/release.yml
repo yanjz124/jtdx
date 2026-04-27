@@ -132,13 +132,17 @@ jobs:
           echo "version=${VER}" >> $GITHUB_OUTPUT
 
       - name: Package as zip
+        shell: pwsh
         run: |
-          cd build
-          ZIP="jtdx-${{ steps.version.outputs.version }}-win64.zip"
-          # Robocopy-style packaging with bash
-          cd install
-          /mingw64/bin/zip -r "../$ZIP" .
-          ls -la "../$ZIP"
+          $ver = "${{ steps.version.outputs.version }}"
+          $zip = "build/jtdx-$ver-win64.zip"
+          if (Test-Path "build/install") {
+            Compress-Archive -Path "build/install/*" -DestinationPath $zip -Force
+            Get-Item $zip
+          } else {
+            Write-Error "build/install directory missing"
+            exit 1
+          }
 
       - name: Build NSIS installer
         run: |
