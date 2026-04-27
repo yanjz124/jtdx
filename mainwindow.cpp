@@ -4029,6 +4029,7 @@ void MainWindow::update_candidate_panel()
     }
     else if (c.busy_with_other) status = c.busy_partner.isEmpty() ? tr("busy") : tr("→ %1").arg(c.busy_partner);
     else if (c.manual_pin) status = tr("pinned");
+    else if (!hisBase.isEmpty()) status = tr("queued");  // we're calling someone else
     else status = tr("ready");
 
     auto setCell = [&](int col, QString const& text, Qt::Alignment align = Qt::AlignLeft | Qt::AlignVCenter) {
@@ -5081,14 +5082,18 @@ void MainWindow::readFromStdout()                             //readFromStdout
           involvesDX = true;
         }
       }
-      // Also include CQs in passive mode when we don't have an active QSO —
-      // by the time autoseq picks one of them as our DX, the decode is
-      // already past, so we need to show them proactively. This way the
-      // CQ that triggered the call IS in the Rx Frequency window.
+      // In passive mode, include CQs in the Rx Frequency window whenever
+      // we haven't yet exchanged signal reports with anyone. autoseq might
+      // switch DX to one of these CQers between cycles, so we want them
+      // already visible in the right panel — otherwise the CQ that
+      // triggered our auto-pick is missing.  Once the QSO is real
+      // (m_status >= RREPORT, or we're past basic CALLING), only the
+      // partner's messages appear via involvesDX.
       bool isCqInPassive = false;
-      if (m_passiveMode && m_hisCall.isEmpty()) {
+      if (m_passiveMode) {
         bool isCq = decodedtextmsg.startsWith("CQ ") || decodedtextmsg.contains(" CQ ");
-        if (isCq) isCqInPassive = true;
+        bool inActiveQSO = m_status >= QsoHistory::RREPORT && m_status < QsoHistory::FIN;
+        if (isCq && !inActiveQSO) isCqInPassive = true;
       }
       if (qAbs(decodedtext.frequencyOffset() - m_wideGraph->rxFreq()) <= 10 || (m_showMyCallMsgRxWindow && mycallinmsg) || bcontent || bdxcall73 || (m_showWantedCallRxWindow && notified & 8) || cooldownBreakthrough || involvesDX || isCqInPassive) {
 
@@ -7276,6 +7281,20 @@ void MainWindow::acceptQSO2(QDateTime const& QSO_date_off, QString const& call, 
   m_qsoLogged=true;
   m_logBook.addAsWorked (call, m_config.bands ()->find (dial_freq), mode, date, grid, name);
   m_stationTracker.note_qso_completed(call);
+  // Drop the just-logged station from the candidate panel — they're a
+  // confirmed dupe on this band+mode now and shouldn't appear in the
+  // "intending to work" list. Also clear any cooldown for them so the
+  // exponential-strikes counter doesn't carry over to the next QSO.
+  {
+    QString base = Radio::base_callsign(call);
+    if (!base.isEmpty()) {
+      m_passiveCandidates.remove(base);
+      m_passiveCooldown.remove(base);
+      m_passiveCooldownStrikes.remove(base);
+      passive_save_cooldowns();
+    }
+    update_candidate_panel();
+  }
   QString operator_call = m_config.my_callsign(); QString my_call = m_config.my_callsign(); QString my_grid = m_config.my_grid();
   m_messageClient->qso_logged (QSO_date_off, call, grid, dial_freq, mode, rpt_sent, rpt_received, tx_power, comments, name, QSO_date_on, operator_call, my_call, my_grid);
   if(m_config.enable_udp1_adif_sending()) m_messageClient->logged_ADIF(myadif2);
