@@ -4609,8 +4609,12 @@ void MainWindow::guiUpdate()
  // For all modes other than WSPR
     m_bTxTime = (t2p >= tx1) and (t2p < tx2);
   }
-  // Passive mode: suppress CQ transmission when no QSO is in progress
-  if(m_passiveMode && m_bTxTime && m_hisCall.isEmpty() && m_QSOProgress == CALLING) {
+  // Passive mode: suppress ALL transmission when no QSO is in progress.
+  // Earlier this was gated by m_QSOProgress == CALLING but the progress
+  // value can be stale from a finished QSO, leaking unwanted transmissions
+  // (typically a leftover RR73 or 73 message). Without a hisCall there is
+  // nothing legitimate to send, regardless of QSOProgress.
+  if(m_passiveMode && m_bTxTime && m_hisCall.isEmpty()) {
     m_bTxTime = false;
   }
   if(m_tune) m_bTxTime=true;                 //"Tune" takes precedence
