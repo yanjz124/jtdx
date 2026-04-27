@@ -160,6 +160,7 @@ PSKSelfMonitor::Stats PSKSelfMonitor::parse_reply (QByteArray const& body) const
   }
   s.unique_callsigns = calls.size ();
   s.unique_dxcc = dxcc.size ();
+  s.receivers = QStringList (calls.begin (), calls.end ());
 
   // Phase 2: count how many of our recent TX cycles were heard by anyone.
   // Tolerance ±60s so TR-period mismatches and decoder lag don't cause

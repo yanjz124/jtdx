@@ -8,6 +8,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QSet>
 #include <QHash>
 #include <QList>
@@ -32,7 +33,7 @@ public:
     int tx_count = 0;               // TXs recorded in window
     int tx_heard_count = 0;         // TXs that matched at least one spot
     QHash<QString, int> by_dxcc;    // receiverDXCCCode -> spots
-    QHash<QString, int> by_continent; // 2-letter continent -> spots (best-effort)
+    QStringList receivers;          // unique receiver callsigns (for continent lookup)
   };
 
   explicit PSKSelfMonitor (QNetworkAccessManager * network_manager, QObject * parent = nullptr);

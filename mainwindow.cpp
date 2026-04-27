@@ -3169,15 +3169,30 @@ void MainWindow::handlePSKSelfPollResult()
       mins_ago = int((now_s - s.latest_spot_epoch) / 60);
       if (mins_ago < 0) mins_ago = 0;
     }
+    // Phase 3: continent breakdown via logbook DXCC lookup.
+    QHash<QString, int> by_continent;
+    for (QString const& rxc : s.receivers) {
+      QString cn;
+      m_logBook.getDXCC(rxc, cn);
+      if (cn.isEmpty()) continue;
+      QString continent = cn.split(',').value(0).trimmed();
+      if (continent.isEmpty() || continent == "??") continue;
+      by_continent[continent] = by_continent.value(continent, 0) + 1;
+    }
+    QStringList parts;
+    for (auto it = by_continent.constBegin(); it != by_continent.constEnd(); ++it)
+      parts << QString("%1×%2").arg(it.key()).arg(it.value());
+    std::sort(parts.begin(), parts.end());
+    QString continents = parts.isEmpty() ? "" : (" [" + parts.join(" ") + "]");
     if (pct >= 0)
-      text = tr("PSK: %1/%2 TX (%3%%) %4 RX %5 DXCC last %6m best %7 dB")
+      text = tr("PSK: %1/%2 TX (%3%%) %4 RX %5 DXCC last %6m best %7 dB%8")
               .arg(s.tx_heard_count).arg(s.tx_count).arg(pct)
               .arg(s.unique_callsigns).arg(s.unique_dxcc)
-              .arg(mins_ago).arg(s.best_snr);
+              .arg(mins_ago).arg(s.best_snr).arg(continents);
     else
-      text = tr("PSK: %1 RX %2 DXCC last %3m best %4 dB")
+      text = tr("PSK: %1 RX %2 DXCC last %3m best %4 dB%5")
               .arg(s.unique_callsigns).arg(s.unique_dxcc)
-              .arg(mins_ago).arg(s.best_snr);
+              .arg(mins_ago).arg(s.best_snr).arg(continents);
     if (mins_ago >= 0 && mins_ago <= 5) bg = "#a8e6a3";
     else if (mins_ago > 0 && mins_ago <= 30) bg = "#ffe699";
     else bg = "#ff9999";
