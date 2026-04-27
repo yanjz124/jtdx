@@ -53,6 +53,7 @@
 #include "MessageClient.hpp"
 #include "wsprnet.h"
 #include "eqsl.h"
+#include "WavelogUploader.h"
 #include "signalmeter.h"
 #include "HelpTextWindow.hpp"
 #include "SampleDownloader.hpp"
@@ -359,6 +360,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   qso_count_label {new QLabel {""}},
   wsprNet {new WSPRNet {network_manager, this}},
   Eqsl {new EQSL {network_manager, this}},
+  m_wavelog {new WavelogUploader {this}},
   m_hisCall {""},
   m_hisGrid {""},
   m_wantedCall {""}, m_wantedCountry {""}, m_wantedPrefix {""}, m_wantedGrid {""},
@@ -947,6 +949,22 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
 
   m_useDarkStyle = m_config.useDarkStyle();
   readSettings();		         //Restore user's setup params
+
+  // Wavelog uploader: read credentials from existing WaveLogGate config.json
+  // so users who already had it set up don't have to re-enter anything.
+  // Falls back to JTDX-stored values if those exist.
+  if (m_wavelog) {
+    auto creds = WavelogUploader::read_waveloggate_config();
+    if (creds.valid()) {
+      m_wavelog->set_credentials(creds);
+      m_wavelog->set_enabled(m_settings->value("WavelogEnabled", true).toBool());
+      writeToALLTXT(QString("Wavelog: enabled=%1 url=%2 station=%3 radio=%4")
+                    .arg(m_wavelog->is_enabled()).arg(creds.url).arg(creds.station_id).arg(creds.radio_name));
+    } else {
+      m_wavelog->set_enabled(false);
+      writeToALLTXT("Wavelog: no credentials found in WaveLogGate config.json — disabled");
+    }
+  }
 
   QString t;
   if (m_mode.startsWith("FT")) t = "UTC     dB   DT "+tr("Freq   Message");
@@ -6396,6 +6414,9 @@ void MainWindow::acceptQSO2(QDateTime const& QSO_date_off, QString const& call, 
   }
   if (m_config.send_to_eqsl())
       Eqsl->upload(m_config.eqsl_username(),m_config.eqsl_passwd(),m_config.eqsl_nickname(),call,mode,QSO_date_on,rpt_sent,m_config.bands ()->find (dial_freq),eqslcomments);
+  if (m_wavelog && m_wavelog->is_enabled() && !myadif2.isEmpty()) {
+    m_wavelog->upload_qso(myadif2);
+  }
   ui->dxCallEntry->setStyleSheet(QString("QLineEdit {color: %1; background: %2}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#7fff7f",m_useDarkStyle)));
   m_lastloggedcall=call;
   m_lastloggedtime=m_jtdxtime->currentDateTimeUtc2();

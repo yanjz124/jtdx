@@ -60,6 +60,7 @@ class QTime;
 class WSPRBandHopping;
 class HelpTextWindow;
 class EQSL;
+class WavelogUploader;
 class WSPRNet;
 class SoundOutput;
 class Modulator;
@@ -657,6 +658,7 @@ private:
 
   WSPRNet *wsprNet;
   EQSL *Eqsl;
+  WavelogUploader *m_wavelog;
 
   QTimer m_guiTimer;
   QTimer ptt1Timer;                 //StartTx delay
