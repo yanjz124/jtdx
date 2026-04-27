@@ -17,6 +17,9 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include <QStandardPaths>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QDir>
 #include <QDebug>
 #include <QtConcurrent/QtConcurrentRun>
@@ -952,6 +955,10 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
 
   m_useDarkStyle = m_config.useDarkStyle();
   readSettings();		         //Restore user's setup params
+
+  // Restore persisted passive-mode cooldowns so a JTDX restart doesn't
+  // forget which deadbeat stations we just decided to skip (#14).
+  passive_load_cooldowns();
 
   // Wavelog uploader: read credentials from existing WaveLogGate config.json
   // so users who already had it set up don't have to re-enter anything.
@@ -3148,10 +3155,9 @@ void MainWindow::on_skipCallButton_clicked()
     // Don't call clearDX() as that switches to CQ mode and can cut TX
     // Just clear the DX fields and let process_Auto handle the rest
     QString skippedCall = m_hisCall;
-    m_passiveCooldown.insert(Radio::base_callsign(skippedCall), m_jtdxtime->currentMSecsSinceEpoch2() + m_config.cooldownIgnored() * 60000);
+    passive_apply_cooldown(skippedCall, m_config.cooldownIgnored());
     update_autoseq_status(tr("Skipping %1 after this TX → cooldown %2m").arg(skippedCall).arg(m_config.cooldownIgnored()));
-    if(m_config.write_decoded_debug())
-      writeToALLTXT("Manual skip: " + skippedCall + ", cooldown " + QString::number(m_config.cooldownIgnored()) + "min");
+    writeToALLTXT("Manual skip: " + skippedCall + ", cooldown " + QString::number(m_config.cooldownIgnored()) + "min");
     m_qsoHistory.reset_count(skippedCall);
     // Just clear the call/grid fields - don't change TX state
     clearDXfields(" cleared, manual skip");
@@ -3204,6 +3210,7 @@ void MainWindow::handlePSKSelfPollResult()
       if (mins_ago < 0) mins_ago = 0;
     }
     // Phase 3: continent breakdown via logbook DXCC lookup.
+    // Display map (full 30-min window) — what the user sees in the label.
     QHash<QString, int> by_continent;
     for (QString const& rxc : s.receivers) {
       QString cn;
@@ -3213,9 +3220,27 @@ void MainWindow::handlePSKSelfPollResult()
       if (continent.isEmpty() || continent == "??") continue;
       by_continent[continent] = by_continent.value(continent, 0) + 1;
     }
-    // Phase 4: feed the continent counts back to the monitor so process_Auto
-    // can use them as a tie-breaker when picking which CQ to answer.
-    if (m_pskSelfMonitor) m_pskSelfMonitor->set_heard_continents(by_continent);
+    // Decision map (last 10 min only) — used by Phase 4 region targeting.
+    // Propagation shifts within the 30-min window, so older spots shouldn't
+    // bias our CQ selection (#5/#6).
+    QHash<QString, int> by_continent_recent;
+    qint64 now_epoch = QDateTime::currentSecsSinceEpoch();
+    qint64 recent_cutoff = now_epoch - 10 * 60;
+    QSet<QString> seen_recent;
+    for (auto const& pair : s.raw_spots) {
+      if (pair.second < recent_cutoff) continue;
+      if (seen_recent.contains(pair.first)) continue;  // unique-by-call
+      seen_recent.insert(pair.first);
+      QString cn;
+      m_logBook.getDXCC(pair.first, cn);
+      if (cn.isEmpty()) continue;
+      QString continent = cn.split(',').value(0).trimmed();
+      if (continent.isEmpty() || continent == "??") continue;
+      by_continent_recent[continent] = by_continent_recent.value(continent, 0) + 1;
+    }
+    // Phase 4: feed RECENT continent counts back to the monitor so
+    // process_Auto sees current propagation, not stale 25-min-old data.
+    if (m_pskSelfMonitor) m_pskSelfMonitor->set_heard_continents(by_continent_recent);
     QStringList parts;
     for (auto it = by_continent.constBegin(); it != by_continent.constEnd(); ++it)
       parts << QString("%1×%2").arg(it.key()).arg(it.value());
@@ -3689,6 +3714,153 @@ void MainWindow::decode()                                       //decode()
 //  m_msDecoderStarted = m_jtdxtime->currentMSecsSinceEpoch2();
 }
 
+// ---------------------------------------------------------------------------
+// Passive-mode candidate selection helpers.
+//
+// Scoring is composite — base priority from JTDX's existing system (newDXCC,
+// newGrid, etc.) plus behavior-derived bonuses/penalties. Higher = better.
+// See StationTracker for the per-station data we feed into this.
+// ---------------------------------------------------------------------------
+
+int MainWindow::passive_score_candidate(QString const& call, int prio,
+                                        int /*distance_km*/, QString const& continent)
+{
+  int score = prio;  // 1 .. 31 baseline from autoseq priority
+
+  if (call.isEmpty()) return score;
+  QString base = Radio::base_callsign(call);
+
+  StationTracker::Behavior const& b = m_stationTracker.get(base);
+  qint64 now = m_jtdxtime->currentMSecsSinceEpoch2();
+
+  // Recency bonus — heard in the last 30 sec is the freshest signal we have.
+  if (b.last_heard_ms > 0) {
+    qint64 age_ms = now - b.last_heard_ms;
+    if (age_ms < 30000) score += 20;
+    else if (age_ms < 5 * 60000) score += 10;
+    else if (age_ms < 15 * 60000) score += 3;
+  }
+
+  // Active-operator bonus — if they've been observed completing QSOs recently,
+  // they're operating, not just calling unattended.
+  if (b.times_observed_completing > 0) score += 8;
+
+  // Reply-rate bonus from prior observations: if they've replied to us
+  // before, they're a known-answerer.
+  if (b.times_replied_to_us > 0) score += 12;
+
+  // Signal-strength bonus — strong signal means they likely hear us.
+  int snr = b.avg_snr();
+  if (snr >= -10) score += 8;
+  else if (snr >= -18) score += 3;
+  else if (snr <= -22) score -= 5;
+
+  // PSK-Reporter region check: if heatmap has data and this continent has
+  // heard us recently, bonus. If it has data and this continent has NOT
+  // heard us, penalty (gated to lower priorities so we don't suppress
+  // chasing rare DX).
+  if (m_pskSelfMonitor && !continent.isEmpty()) {
+    auto const& s = m_pskSelfMonitor->last_stats();
+    if (s.spot_count >= 10) {
+      if (m_pskSelfMonitor->continent_known_to_hear(continent)) score += 12;
+      else if (prio <= 4) score -= 25;  // basic priority and they can't hear us
+    }
+  }
+
+  // Busy-with-others penalty — if they're mid-QSO with someone, they
+  // can't answer us right now. Don't burn cycles calling them.
+  if (m_stationTracker.is_busy_now(base, now)) score -= 40;
+
+  // Retry-fatigue penalty — if we've called them several times this
+  // session without reply, drop them on the priority list.
+  if (b.times_we_called > 0 && b.times_replied_to_us == 0) {
+    int penalty = qMin(20, b.times_we_called * 4);
+    score -= penalty;
+  }
+
+  return score;
+}
+
+void MainWindow::passive_apply_cooldown(QString const& call, int duration_minutes_base)
+{
+  QString base = Radio::base_callsign(call);
+  if (base.isEmpty()) return;
+  // Exponential backoff: each consecutive cooldown for this station
+  // multiplies the duration by 1.5 (capped at 30 min).
+  int strikes = m_passiveCooldownStrikes.value(base, 0);
+  double mul = qPow(1.5, double(strikes));
+  int minutes = qBound(1, int(duration_minutes_base * mul), 30);
+  m_passiveCooldown.insert(base, m_jtdxtime->currentMSecsSinceEpoch2() + qint64(minutes) * 60000);
+  m_passiveCooldownStrikes.insert(base, strikes + 1);
+  passive_save_cooldowns();
+}
+
+bool MainWindow::passive_should_skip_for_region(QString const& call, int prio,
+                                                 QString const& continent,
+                                                 QString * reason)
+{
+  if (continent.isEmpty()) {
+    // Edge case #16: log and don't skip — better to call than miss someone
+    // for a missing logbook lookup.
+    if (m_pskSelfMonitor && m_pskSelfMonitor->last_stats().spot_count >= 10) {
+      writeToALLTXT("Phase 4: empty continent for " + call + " — skipping region check");
+    }
+    return false;
+  }
+  if (!m_pskSelfMonitor) return false;
+  auto const& s = m_pskSelfMonitor->last_stats();
+  if (s.spot_count < 10) return false;  // sample-size guard
+  // Only skip worked-before basic stations (prio==1). Wanted-call (4),
+  // wanted-prefix (3), wanted-country (2), and any new-* category pass through.
+  if (prio > 1) return false;
+  if (m_pskSelfMonitor->continent_known_to_hear(continent)) return false;
+  if (reason) *reason = QString("region %1 unheard").arg(continent);
+  return true;
+}
+
+void MainWindow::passive_save_cooldowns()
+{
+  QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  QDir().mkpath(dir);
+  QFile f(dir + "/cooldowns.json");
+  if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) return;
+  QJsonObject root;
+  QJsonObject cd;
+  for (auto it = m_passiveCooldown.constBegin(); it != m_passiveCooldown.constEnd(); ++it)
+    cd.insert(it.key(), QJsonValue(qint64(it.value())));
+  QJsonObject st;
+  for (auto it = m_passiveCooldownStrikes.constBegin(); it != m_passiveCooldownStrikes.constEnd(); ++it)
+    st.insert(it.key(), QJsonValue(it.value()));
+  root.insert("cooldowns", cd);
+  root.insert("strikes", st);
+  f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+  f.close();
+}
+
+void MainWindow::passive_load_cooldowns()
+{
+  QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  QFile f(dir + "/cooldowns.json");
+  if (!f.open(QIODevice::ReadOnly)) return;
+  QJsonParseError err{};
+  auto doc = QJsonDocument::fromJson(f.readAll(), &err);
+  f.close();
+  if (err.error != QJsonParseError::NoError || !doc.isObject()) return;
+  QJsonObject root = doc.object();
+  QJsonObject cd = root.value("cooldowns").toObject();
+  qint64 now = m_jtdxtime ? m_jtdxtime->currentMSecsSinceEpoch2()
+                          : QDateTime::currentMSecsSinceEpoch();
+  for (auto it = cd.constBegin(); it != cd.constEnd(); ++it) {
+    qint64 expiry = qint64(it.value().toDouble());
+    if (expiry > now) m_passiveCooldown.insert(it.key(), expiry);
+  }
+  QJsonObject st = root.value("strikes").toObject();
+  for (auto it = st.constBegin(); it != st.constEnd(); ++it) {
+    int strikes = it.value().toInt();
+    if (m_passiveCooldown.contains(it.key())) m_passiveCooldownStrikes.insert(it.key(), strikes);
+  }
+}
+
 void MainWindow::process_Auto()
 {
   int count = 0;
@@ -3773,30 +3945,65 @@ void MainWindow::process_Auto()
       {
         // Determine max retries for passive mode
         int baseMax = m_config.nAnswerCQCounter();
-        int maxRetries = m_passiveMode ? (m_reply_other ? baseMax + 4 : baseMax) : baseMax;
+        int maxRetries = m_passiveMode ? baseMax : baseMax;
         int remaining = maxRetries - count;
         if (remaining < 0) remaining = 0;
-
-        if (m_passiveMode && remaining > 0) {
-          // Passive mode: still have retries left
-          if (m_reply_other)
-            update_autoseq_status(tr("%1 busy with others [try %2 of %3, %4 left]").arg(hisCall).arg(count).arg(maxRetries).arg(remaining));
+        // Busy-with-others (#8): if our target is mid-QSO with someone else,
+        // pause the retry counter — don't burn retries calling thin air.
+        bool busy = false;
+        QString busyPartner;
+        if (m_passiveMode) {
+          QString base = Radio::base_callsign(hisCall);
+          qint64 now = m_jtdxtime->currentMSecsSinceEpoch2();
+          if (m_stationTracker.is_busy_now(base, now)) {
+            busy = true;
+            busyPartner = m_stationTracker.get(base).currently_in_qso_with;
+          } else if (m_reply_other) {
+            busy = true;
+          }
+        }
+        // ETA computation: each retry = ~one TR period (15s FT8, 7.5s FT4, etc.)
+        int trSec = int(m_TRperiod);
+        int etaSec = remaining * trSec;
+        // Phase 4 v2 (#3): re-check region every retry. If autoseq says
+        // they're still calling but PSK heatmap has moved away from their
+        // region, give up earlier than max-retries.
+        QString cnAct;
+        m_logBook.getDXCC(hisCall, cnAct);
+        QString contAct = cnAct.split(',').value(0).trimmed();
+        bool regionGone = (m_passiveMode && count >= 2 && prio <= 1
+                           && passive_should_skip_for_region(hisCall, prio, contAct, nullptr));
+        if (busy) {
+          // Don't increment retries — wait for them to finish.
+          if (!busyPartner.isEmpty())
+            update_autoseq_status(tr("%1 working %2 [hold]").arg(hisCall).arg(busyPartner));
           else
-            update_autoseq_status(tr("Calling %1 [try %2 of %3, %4 left]").arg(hisCall).arg(count).arg(maxRetries).arg(remaining));
-          if(m_config.write_decoded_debug())
-            writeToALLTXT("Passive mode: " + hisCall + " retry " + QString::number(count) + "/" + QString::number(maxRetries));
+            update_autoseq_status(tr("%1 busy with others [hold]").arg(hisCall));
+          // Roll back the retry count one notch since this attempt was wasted.
+          count = m_qsoHistory.reset_count(hisCall, m_status);
+        } else if (m_passiveMode && remaining > 0 && !regionGone) {
+          QString etaStr = (etaSec >= 60) ? QString("~%1m").arg(etaSec / 60)
+                                           : QString("~%1s").arg(etaSec);
+          update_autoseq_status(tr("Calling %1 [try %2/%3, %4 left]").arg(hisCall).arg(count).arg(maxRetries).arg(etaStr));
+          // Track that we attempted (StationTracker)
+          m_stationTracker.note_we_called(Radio::base_callsign(hisCall),
+                                          m_jtdxtime->currentMSecsSinceEpoch2());
+          writeToALLTXT("Passive mode: " + hisCall + " retry " + QString::number(count) + "/" + QString::number(maxRetries));
         } else {
-          // Give up - max retries reached
-          if (m_passiveMode && !m_reply_other) {
-            m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + m_config.cooldownIgnored() * 60000);
-            update_autoseq_status(tr("%1 no reply after %2 tries → cooldown %3m").arg(hisCall).arg(count).arg(m_config.cooldownIgnored()));
-            if(m_config.write_decoded_debug())
-              writeToALLTXT("Passive mode: " + hisCall + " not responding, cooldown " + QString::number(m_config.cooldownIgnored()) + "min");
-          } else if (m_passiveMode) {
-            m_passiveCooldown.insert(Radio::base_callsign(hisCall), m_jtdxtime->currentMSecsSinceEpoch2() + m_config.cooldownBusy() * 60000);
-            update_autoseq_status(tr("%1 never answered after %2 tries → cooldown %3m").arg(hisCall).arg(count).arg(m_config.cooldownBusy()));
-            if(m_config.write_decoded_debug())
-              writeToALLTXT("Passive mode: " + hisCall + " never answered us, cooldown " + QString::number(m_config.cooldownBusy()) + "min");
+          // Give up - max retries reached, or region went dead
+          if (m_passiveMode) {
+            int baseMin = regionGone ? m_config.cooldownIgnored()
+                                     : (m_reply_other ? m_config.cooldownBusy() : m_config.cooldownIgnored());
+            passive_apply_cooldown(hisCall, baseMin);
+            int actualMin = qint64(m_passiveCooldown.value(Radio::base_callsign(hisCall))
+                                   - m_jtdxtime->currentMSecsSinceEpoch2()) / 60000 + 1;
+            QString why = regionGone ? "region dead"
+                                     : (m_reply_other ? "never answered" : "no reply");
+            update_autoseq_status(tr("%1 %2 after %3 tries → cooldown %4m")
+                                  .arg(hisCall).arg(why).arg(count).arg(actualMin));
+            writeToALLTXT(QString("Passive mode: %1 give-up (%2), cooldown %3m (strikes=%4)")
+                          .arg(hisCall).arg(why).arg(actualMin)
+                          .arg(m_passiveCooldownStrikes.value(Radio::base_callsign(hisCall), 0)));
           }
           clearDX (" cleared, RCQ/SCALL/SREPORT count reached");
           if (m_reply_other)
@@ -3864,33 +4071,121 @@ void MainWindow::process_Auto()
       QMutableHashIterator<QString, qint64> it(m_passiveCooldown);
       while (it.hasNext()) {
         it.next();
-        if (now >= it.value()) it.remove();
+        if (now >= it.value()) {
+          it.remove();
+          m_passiveCooldownStrikes.remove(it.key());
+        }
+      }
+      passive_save_cooldowns();
+    }
+    // Iterative candidate selection — autoseq picks the highest-priority
+    // candidate; we apply our extra filters (cooldown, region, busy, retry
+    // fatigue) and loop with a skip-set if rejected. Up to 8 attempts to
+    // bound worst-case CPU; in practice 1-2 iterations is typical.
+    QSet<QString> tried_skip;
+    QStringList rejected_log;  // for status-bar idle-reason summary
+    int best_score = -999;
+    QString best_call;
+    QsoHistory::Status best_status = QsoHistory::NONE;
+    QString best_grid, best_rpt, best_mode;
+    int best_rx = rx, best_tx = tx, best_count = count, best_prio = prio;
+    unsigned best_time = time;
+    int candidates_examined = 0;
+    int max_candidates = m_passiveMode ? 8 : 1;
+    for (int iter = 0; iter < max_candidates; iter++) {
+      QString try_call;
+      QString try_grid, try_rpt = m_rpt, try_mode;
+      int try_rx = rx, try_tx = tx, try_count = 0, try_prio = 0;
+      unsigned try_time = time;
+      QsoHistory::Status s;
+      if (m_passiveMode) {
+        s = m_qsoHistory.autoseq_with_skip(tried_skip, try_call, try_grid, try_rpt,
+                                            try_rx, try_tx, try_time, try_count, try_prio, try_mode);
+      } else {
+        s = m_qsoHistory.autoseq(try_call, try_grid, try_rpt,
+                                  try_rx, try_tx, try_time, try_count, try_prio, try_mode);
+      }
+      if (try_call.isEmpty()) break;
+      candidates_examined++;
+      // Filter pipeline (passive mode only; non-passive keeps the first pick)
+      if (m_passiveMode) {
+        QString base = Radio::base_callsign(try_call);
+        // Cooldown
+        if (m_passiveCooldown.contains(base)) {
+          tried_skip.insert(try_call);
+          rejected_log << QString("%1:cooldown").arg(try_call);
+          continue;
+        }
+        // Region check (Phase 4 — only blocks worked-before basics)
+        QString cn;
+        m_logBook.getDXCC(try_call, cn);
+        QString continent = cn.split(',').value(0).trimmed();
+        if (!continent.isEmpty()) m_stationTracker.set_continent(try_call, continent);
+        QString skip_reason;
+        if (passive_should_skip_for_region(try_call, try_prio, continent, &skip_reason)) {
+          tried_skip.insert(try_call);
+          rejected_log << QString("%1:%2").arg(try_call).arg(skip_reason);
+          continue;
+        }
+        // Score and keep the best
+        int sc = passive_score_candidate(try_call, try_prio, 0, continent);
+        if (sc > best_score) {
+          best_score = sc;
+          best_call = try_call;
+          best_status = s;
+          best_grid = try_grid;
+          best_rpt = try_rpt;
+          best_mode = try_mode;
+          best_rx = try_rx;
+          best_tx = try_tx;
+          best_count = try_count;
+          best_prio = try_prio;
+          best_time = try_time;
+        }
+        // Continue iterating to compare against other candidates.
+        tried_skip.insert(try_call);
+        if (iter == 0 && best_score >= 25) {
+          // Strong primary candidate — don't bother checking marginal
+          // alternates that almost certainly score lower.
+          break;
+        }
+      } else {
+        // Non-passive: keep first pick verbatim
+        best_call = try_call; best_status = s; best_grid = try_grid;
+        best_rpt = try_rpt; best_mode = try_mode;
+        best_rx = try_rx; best_tx = try_tx; best_count = try_count; best_prio = try_prio;
+        best_time = try_time;
+        break;
       }
     }
-    m_status = m_qsoHistory.autoseq(hisCall,grid,rpt,rx,tx,time,count,prio,mode);
-    // Passive mode: skip stations on cooldown
-    if (m_passiveMode && !hisCall.isEmpty() && m_passiveCooldown.contains(Radio::base_callsign(hisCall))) {
-      if(m_config.write_decoded_debug())
-        writeToALLTXT("Passive mode: skipping " + hisCall + " (on cooldown), staying in monitor");
+    if (!best_call.isEmpty()) {
+      hisCall = best_call;
+      grid = best_grid;
+      rpt = best_rpt;
+      mode = best_mode;
+      rx = best_rx;
+      tx = best_tx;
+      count = best_count;
+      prio = best_prio;
+      time = best_time;
+      m_status = best_status;
+    } else {
       hisCall = "";
       m_status = QsoHistory::NONE;
     }
-    // Phase 4: in passive mode, if the picked CQ is from a continent that
-    // PSK Reporter says hasn't heard us recently, AND it's a low-priority
-    // pick (worked-before with no "new" bonus), skip it. We want our cycles
-    // spent on stations that can actually hear us. Sample-size guarded
-    // inside continent_known_to_hear() — needs ≥10 spots before activating.
-    if (m_passiveMode && !hisCall.isEmpty() && prio <= 4 && m_pskSelfMonitor) {
-      QString cn;
-      m_logBook.getDXCC(hisCall, cn);
-      QString continent = cn.split(',').value(0).trimmed();
-      if (!continent.isEmpty()
-          && m_pskSelfMonitor->last_stats().spot_count >= 10
-          && !m_pskSelfMonitor->continent_known_to_hear(continent)) {
-        writeToALLTXT(QString("Phase 4: skipping %1 (continent %2 not in heard list, prio=%3)")
-                      .arg(hisCall).arg(continent).arg(prio));
-        hisCall = "";
-        m_status = QsoHistory::NONE;
+    // Build idle-reason summary for status bar (#12)
+    if (m_passiveMode) {
+      if (rejected_log.isEmpty()) m_passiveSkipSummary.clear();
+      else {
+        int n_cooldown = 0, n_region = 0;
+        for (auto const& s : rejected_log) {
+          if (s.contains(":cooldown")) n_cooldown++;
+          else if (s.contains(":region")) n_region++;
+        }
+        QStringList parts;
+        if (n_cooldown > 0) parts << QString("%1 cooldown").arg(n_cooldown);
+        if (n_region > 0) parts << QString("%1 region").arg(n_region);
+        m_passiveSkipSummary = parts.join(", ");
       }
     }
     if(m_config.write_decoded_debug()) {
@@ -3935,7 +4230,10 @@ void MainWindow::process_Auto()
           if(m_config.write_decoded_debug())
             writeToALLTXT("Passive mode: halting CQ, returning to monitor");
         }
-        // Show cooldown info if any stations are cooling down
+        // Compose status: skip summary (#12) + cooldown info
+        QStringList statusBits;
+        if (!m_passiveSkipSummary.isEmpty())
+          statusBits << tr("rejected: %1").arg(m_passiveSkipSummary);
         if (!m_passiveCooldown.isEmpty()) {
           auto now = m_jtdxtime->currentMSecsSinceEpoch2();
           QString cdInfo;
@@ -3946,13 +4244,12 @@ void MainWindow::process_Auto()
               cdInfo += it.key() + " " + QString::number(secsLeft/60) + ":" + QString::number(secsLeft%60).rightJustified(2,'0');
             }
           }
-          if (!cdInfo.isEmpty())
-            update_autoseq_status(tr("Monitoring (Cooldown: %1)").arg(cdInfo));
-          else
-            update_autoseq_status(tr("Monitoring"));
-        } else {
-          update_autoseq_status(tr("Monitoring"));
+          if (!cdInfo.isEmpty()) statusBits << tr("CD: %1").arg(cdInfo);
         }
+        if (statusBits.isEmpty())
+          update_autoseq_status(tr("Monitoring"));
+        else
+          update_autoseq_status(tr("Monitoring (%1)").arg(statusBits.join(" | ")));
     } else if (m_transmittedQSOProgress != CALLING) {
         on_txb6_clicked();
         if(ui->tabWidget->currentIndex()==1) ui->genMsg->setText(ui->tx6->text());
@@ -4271,6 +4568,24 @@ void MainWindow::readFromStdout()                             //readFromStdout
       QString deCall="";
       QString grid="";
       decodedtext.deCallAndGrid(/*out*/deCall,grid);
+      // Update the station behavior tracker BEFORE any selection happens —
+      // we want the latest signal data available to whatever runs next.
+      if (!deCall.isEmpty()) {
+        bool isCq = decodedtextmsg.startsWith("CQ ") || decodedtextmsg.contains(" CQ ");
+        m_stationTracker.note_decode(deCall,
+                                     decodedtext.call(),  // first call in msg = target
+                                     m_baseCall,
+                                     isCq, decodedtext.snr(),
+                                     grid, m_jtdxtime->currentMSecsSinceEpoch2());
+        if (!grid.isEmpty()) m_stationTracker.set_distance(deCall, /* distance unknown here */ 0);
+        // Edge case #15: a station that's CQing while on our cooldown list
+        // is back on the air and active. Remove them so they're eligible.
+        if (isCq && m_passiveCooldown.contains(Radio::base_callsign(deCall))) {
+          m_passiveCooldown.remove(Radio::base_callsign(deCall));
+          m_passiveCooldownStrikes.remove(Radio::base_callsign(deCall));
+          writeToALLTXT("Cooldown lifted: " + deCall + " is CQing again");
+        }
+      }
       // Cooldown breakthrough: if a station on cooldown is calling us directly,
       // remove from cooldown and switch to them — top priority unless we're
       // in an active QSO where the other station has already responded to us
@@ -6544,6 +6859,7 @@ void MainWindow::acceptQSO2(QDateTime const& QSO_date_off, QString const& call, 
   QString date = QSO_date_on.toString("yyyyMMdd");
   m_qsoLogged=true;
   m_logBook.addAsWorked (call, m_config.bands ()->find (dial_freq), mode, date, grid, name);
+  m_stationTracker.note_qso_completed(call);
   QString operator_call = m_config.my_callsign(); QString my_call = m_config.my_callsign(); QString my_grid = m_config.my_grid();
   m_messageClient->qso_logged (QSO_date_off, call, grid, dial_freq, mode, rpt_sent, rpt_received, tx_power, comments, name, QSO_date_on, operator_call, my_call, my_grid);
   if(m_config.enable_udp1_adif_sending()) m_messageClient->logged_ADIF(myadif2);

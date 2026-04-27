@@ -325,6 +325,34 @@ as_active = false;
 return NONE;
 }
 
+QsoHistory::Status QsoHistory::autoseq_with_skip(QSet<QString> const& skip_set,
+                                                 QString &callsign, QString &grid, QString &rep,
+                                                 int &rx, int &tx, unsigned &time, int &count,
+                                                 int &prio, QString &mode)
+{
+    if (skip_set.isEmpty () || !_working) {
+        return autoseq (callsign, grid, rep, rx, tx, time, count, prio, mode);
+    }
+    // Temporarily blacklist the skip set so the existing on_black filter
+    // in autoseq() excludes them from candidate iteration. Save and restore
+    // any original blacklist values to avoid corrupting persistent state.
+    QHash<QString, int> saved;
+    for (QString const& call : skip_set) {
+        QString base = Radio::base_callsign (call);
+        if (base.length () < 3) continue;
+        if (_blackdata.contains (base)) saved.insert (base, _blackdata.value (base));
+        _blackdata.insert (base, 1);
+    }
+    QsoHistory::Status ret = autoseq (callsign, grid, rep, rx, tx, time, count, prio, mode);
+    for (QString const& call : skip_set) {
+        QString base = Radio::base_callsign (call);
+        if (base.length () < 3) continue;
+        if (saved.contains (base)) _blackdata.insert (base, saved.value (base));
+        else _blackdata.remove (base);
+    }
+    return ret;
+}
+
 QsoHistory::Status QsoHistory::log_data(QString const& callsign, unsigned &time, QString &rrep, QString &srep)
 {
     if (_working)
