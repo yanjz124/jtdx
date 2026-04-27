@@ -963,18 +963,7 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   // Wavelog uploader: read credentials from existing WaveLogGate config.json
   // so users who already had it set up don't have to re-enter anything.
   // Falls back to JTDX-stored values if those exist.
-  if (m_wavelog) {
-    auto creds = WavelogUploader::read_waveloggate_config();
-    if (creds.valid()) {
-      m_wavelog->set_credentials(creds);
-      m_wavelog->set_enabled(m_settings->value("WavelogEnabled", true).toBool());
-      writeToALLTXT(QString("Wavelog: enabled=%1 url=%2 station=%3 radio=%4")
-                    .arg(m_wavelog->is_enabled()).arg(creds.url).arg(creds.station_id).arg(creds.radio_name));
-    } else {
-      m_wavelog->set_enabled(false);
-      writeToALLTXT("Wavelog: no credentials found in WaveLogGate config.json — disabled");
-    }
-  }
+  if (m_wavelog) refresh_wavelog_credentials();
 
   QString t;
   if (m_mode.startsWith("FT")) t = "UTC     dB   DT "+tr("Freq   Message");
@@ -2044,6 +2033,8 @@ void MainWindow::on_actionSettings_triggered()               //Setup Dialog
       if(m_config.write_decoded_debug()) writeToALLTXT("Configuration settings change accepted");
       ui->decodedTextBrowser->setConfiguration (&m_config);
       ui->decodedTextBrowser2->setConfiguration (&m_config);
+      // Re-load Wavelog uploader with possibly-changed credentials.
+      refresh_wavelog_credentials();
       if (m_config.useDarkStyle() != m_useDarkStyle) {
         m_useDarkStyle = m_config.useDarkStyle();
         styleChanged();
@@ -3858,6 +3849,31 @@ void MainWindow::passive_load_cooldowns()
   for (auto it = st.constBegin(); it != st.constEnd(); ++it) {
     int strikes = it.value().toInt();
     if (m_passiveCooldown.contains(it.key())) m_passiveCooldownStrikes.insert(it.key(), strikes);
+  }
+}
+
+void MainWindow::refresh_wavelog_credentials()
+{
+  if (!m_wavelog) return;
+  WavelogUploader::Credentials c;
+  // Prefer values stored in JTDX settings (UI-managed). Fall back to
+  // WaveLogGate's config.json if the user hasn't configured anything yet.
+  c.url = m_config.wavelog_url();
+  c.api_key = m_config.wavelog_api_key();
+  c.station_id = m_config.wavelog_station_id();
+  c.radio_name = m_config.wavelog_radio_name();
+  if (!c.valid()) {
+    auto fallback = WavelogUploader::read_waveloggate_config();
+    if (fallback.valid()) c = fallback;
+  }
+  if (c.valid()) {
+    m_wavelog->set_credentials(c);
+    m_wavelog->set_enabled(m_config.wavelog_enabled());
+    writeToALLTXT(QString("Wavelog: enabled=%1 url=%2 station=%3 radio=%4")
+                  .arg(m_wavelog->is_enabled()).arg(c.url).arg(c.station_id).arg(c.radio_name));
+  } else {
+    m_wavelog->set_enabled(false);
+    writeToALLTXT("Wavelog: no credentials configured — disabled");
   }
 }
 

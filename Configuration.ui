@@ -2997,6 +2997,98 @@ for assessing propagation and system performance.</string>
           </widget>
          </item>
          <item>
+          <widget class="QGroupBox" name="groupBox_wavelog">
+           <property name="toolTip">
+            <string>Direct upload of QSOs to a Wavelog server. Replaces the need for a separate WaveLogGate process.</string>
+           </property>
+           <property name="title">
+            <string>Wavelog Direct Upload</string>
+           </property>
+           <layout class="QGridLayout" name="gridLayout_wavelog">
+            <property name="leftMargin"><number>4</number></property>
+            <property name="topMargin"><number>4</number></property>
+            <property name="rightMargin"><number>4</number></property>
+            <property name="bottomMargin"><number>4</number></property>
+            <property name="spacing"><number>3</number></property>
+            <item row="0" column="0">
+             <widget class="QCheckBox" name="wavelog_enable_check_box">
+              <property name="toolTip">
+               <string>If enabled, JTDX will POST each logged QSO directly to your Wavelog server (you no longer need WaveLogGate). On first run, credentials are auto-populated from the existing WaveLogGate config if found.</string>
+              </property>
+              <property name="text">
+               <string>Enable direct upload</string>
+              </property>
+             </widget>
+            </item>
+            <item row="0" column="1" colspan="3">
+             <widget class="QPushButton" name="wavelog_test_push_button">
+              <property name="toolTip">
+               <string>Send a test (empty) ADIF to verify URL/key work. Should respond with 'created'.</string>
+              </property>
+              <property name="text">
+               <string>Test</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
+             <widget class="QLabel" name="wavelog_url_label">
+              <property name="text"><string>Server URL:</string></property>
+              <property name="buddy"><cstring>wavelog_url_edit</cstring></property>
+             </widget>
+            </item>
+            <item row="1" column="1" colspan="3">
+             <widget class="QLineEdit" name="wavelog_url_edit">
+              <property name="toolTip"><string>Base URL of your Wavelog instance, e.g. http://wavelog.example.com:8086/</string></property>
+              <property name="placeholderText"><string>http://wavelog.example.com:8086/</string></property>
+             </widget>
+            </item>
+            <item row="2" column="0">
+             <widget class="QLabel" name="wavelog_key_label">
+              <property name="text"><string>API key:</string></property>
+              <property name="buddy"><cstring>wavelog_key_edit</cstring></property>
+             </widget>
+            </item>
+            <item row="2" column="1" colspan="3">
+             <widget class="QLineEdit" name="wavelog_key_edit">
+              <property name="toolTip"><string>Wavelog API key (Account → API keys → Generate). Treated as a password.</string></property>
+              <property name="echoMode"><enum>QLineEdit::Password</enum></property>
+             </widget>
+            </item>
+            <item row="3" column="0">
+             <widget class="QLabel" name="wavelog_station_label">
+              <property name="text"><string>Station ID:</string></property>
+              <property name="buddy"><cstring>wavelog_station_edit</cstring></property>
+             </widget>
+            </item>
+            <item row="3" column="1">
+             <widget class="QLineEdit" name="wavelog_station_edit">
+              <property name="toolTip"><string>Station profile ID in Wavelog (usually 1).</string></property>
+              <property name="placeholderText"><string>1</string></property>
+             </widget>
+            </item>
+            <item row="3" column="2">
+             <widget class="QLabel" name="wavelog_radio_label">
+              <property name="text"><string>Radio name:</string></property>
+              <property name="buddy"><cstring>wavelog_radio_edit</cstring></property>
+             </widget>
+            </item>
+            <item row="3" column="3">
+             <widget class="QLineEdit" name="wavelog_radio_edit">
+              <property name="toolTip"><string>Optional radio identifier sent with each QSO (e.g. KX2, FT-991A).</string></property>
+              <property name="placeholderText"><string>KX2</string></property>
+             </widget>
+            </item>
+            <item row="4" column="0" colspan="4">
+             <widget class="QLabel" name="wavelog_status_label">
+              <property name="styleSheet"><string>color: #888;</string></property>
+              <property name="text"><string/></property>
+              <property name="wordWrap"><bool>true</bool></property>
+             </widget>
+            </item>
+           </layout>
+          </widget>
+         </item>
+         <item>
           <widget class="QGroupBox" name="groupBox_4">
            <property name="toolTip">
             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Primary UDP connection to external software.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>

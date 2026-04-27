@@ -105,6 +105,7 @@ public slots:
   void passive_load_cooldowns();
   void passive_save_cooldowns();
   bool passive_should_skip_for_region(QString const& call, int prio, QString const& continent, QString * reason = nullptr);
+  void refresh_wavelog_credentials();
   void p1ReadFromStdout();
   void setXIT(int n, Frequency base = 0u);
   void setFreq4(int rxFreq, int txFreq);

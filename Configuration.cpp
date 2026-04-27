@@ -136,6 +136,10 @@
 
 #include <QApplication>
 #include <QMetaType>
+#include <QProcess>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QList>
 #include <QSettings>
 #include <QAudioDeviceInfo>
@@ -442,6 +446,7 @@ private:
   Q_SLOT void on_CAT_poll_interval_spin_box_valueChanged (int);
   Q_SLOT void on_split_mode_button_group_buttonClicked (int);
   Q_SLOT void on_test_CAT_push_button_clicked ();
+  Q_SLOT void on_wavelog_test_push_button_clicked ();
   Q_SLOT void on_test_PTT_push_button_clicked (bool checked);
   Q_SLOT void on_force_DTR_combo_box_currentIndexChanged (int);
   Q_SLOT void on_force_RTS_combo_box_currentIndexChanged (int);
@@ -743,6 +748,11 @@ private:
   bool spot_to_psk_reporter_;
   bool spot_to_dxsummit_;
   bool psk_self_monitor_;
+  bool wavelog_enabled_;
+  QString wavelog_url_;
+  QString wavelog_api_key_;
+  QString wavelog_station_id_;
+  QString wavelog_radio_name_;
   bool prevent_spotting_false_;
   bool filterUDP_;
   bool send_to_eqsl_;
@@ -1003,6 +1013,11 @@ bool Configuration::spot_to_psk_reporter () const
 }
 bool Configuration::spot_to_dxsummit () const {return m_->spot_to_dxsummit_;}
 bool Configuration::psk_self_monitor () const {return m_->psk_self_monitor_;}
+bool Configuration::wavelog_enabled () const {return m_->wavelog_enabled_;}
+QString Configuration::wavelog_url () const {return m_->wavelog_url_;}
+QString Configuration::wavelog_api_key () const {return m_->wavelog_api_key_;}
+QString Configuration::wavelog_station_id () const {return m_->wavelog_station_id_;}
+QString Configuration::wavelog_radio_name () const {return m_->wavelog_radio_name_;}
 bool Configuration::prevent_spotting_false () const {return m_->prevent_spotting_false_;}
 bool Configuration::filterUDP () const {return m_->filterUDP_;}
 bool Configuration::monitor_off_at_startup () const {return m_->monitor_off_at_startup_;}
@@ -2014,6 +2029,12 @@ Radio::convert_dark("#fafbfe",useDarkStyle_),Radio::convert_dark("#dcdef1",useDa
   ui_->psk_reporter_check_box->setChecked (spot_to_psk_reporter_);
   ui_->dxsummit_check_box->setChecked (spot_to_dxsummit_);
   ui_->psk_self_monitor_check_box->setChecked (psk_self_monitor_);
+  ui_->wavelog_enable_check_box->setChecked (wavelog_enabled_);
+  ui_->wavelog_url_edit->setText (wavelog_url_);
+  ui_->wavelog_key_edit->setText (wavelog_api_key_);
+  ui_->wavelog_station_edit->setText (wavelog_station_id_);
+  ui_->wavelog_radio_edit->setText (wavelog_radio_name_);
+  ui_->wavelog_status_label->setText (QString());
   ui_->preventFalseUDP_check_box->setChecked (prevent_spotting_false_);
   ui_->filterUDP_check_box->setChecked (filterUDP_);
   ui_->eqsluser_edit->setText (eqsl_username_);
@@ -2431,6 +2452,11 @@ void Configuration::impl::read_settings ()
   spot_to_psk_reporter_ = settings_->value ("PSKReporter", false).toBool ();
   spot_to_dxsummit_ = settings_->value ("AllowSpotsDXSummit", false).toBool ();
   psk_self_monitor_ = settings_->value ("PSKSelfMonitor", false).toBool ();
+  wavelog_enabled_ = settings_->value ("WavelogEnabled", false).toBool ();
+  wavelog_url_ = settings_->value ("WavelogUrl", QString()).toString ();
+  wavelog_api_key_ = settings_->value ("WavelogApiKey", QString()).toString ();
+  wavelog_station_id_ = settings_->value ("WavelogStationId", "1").toString ();
+  wavelog_radio_name_ = settings_->value ("WavelogRadioName", QString()).toString ();
   prevent_spotting_false_ = settings_->value ("preventFalseUDPspots", true).toBool ();
 
   if(settings_->value ("ApplyFiltersToUDPmessages").toString()=="false" || settings_->value ("ApplyFiltersToUDPmessages").toString()=="true")
@@ -2789,6 +2815,11 @@ void Configuration::impl::write_settings ()
   settings_->setValue ("PSKReporter", spot_to_psk_reporter_);
   settings_->setValue ("AllowSpotsDXSummit", spot_to_dxsummit_);
   settings_->setValue ("PSKSelfMonitor", psk_self_monitor_);
+  settings_->setValue ("WavelogEnabled", wavelog_enabled_);
+  settings_->setValue ("WavelogUrl", wavelog_url_);
+  settings_->setValue ("WavelogApiKey", wavelog_api_key_);
+  settings_->setValue ("WavelogStationId", wavelog_station_id_);
+  settings_->setValue ("WavelogRadioName", wavelog_radio_name_);
   settings_->setValue ("preventFalseUDPspots", prevent_spotting_false_);
   settings_->setValue ("ApplyFiltersToUDPmessages", filterUDP_);
   settings_->setValue ("EQSLSend", send_to_eqsl_);
@@ -3362,6 +3393,11 @@ void Configuration::impl::accept ()
   spot_to_psk_reporter_ = ui_->psk_reporter_check_box->isChecked ();
   spot_to_dxsummit_ = ui_->dxsummit_check_box->isChecked ();
   psk_self_monitor_ = ui_->psk_self_monitor_check_box->isChecked ();
+  wavelog_enabled_ = ui_->wavelog_enable_check_box->isChecked ();
+  wavelog_url_ = ui_->wavelog_url_edit->text ().trimmed ();
+  wavelog_api_key_ = ui_->wavelog_key_edit->text ().trimmed ();
+  wavelog_station_id_ = ui_->wavelog_station_edit->text ().trimmed ();
+  wavelog_radio_name_ = ui_->wavelog_radio_edit->text ().trimmed ();
   prevent_spotting_false_ = ui_->preventFalseUDP_check_box->isChecked ();
   filterUDP_ =  ui_->filterUDP_check_box->isChecked ();
   if(!ui_->eqsluser_edit->text ().isEmpty () && !ui_->eqslpasswd_edit->text ().isEmpty () && !ui_->eqslnick_edit->text ().isEmpty ()) send_to_eqsl_ = ui_->eqsl_check_box->isChecked ();
@@ -4926,6 +4962,77 @@ void Configuration::impl::on_CAT_poll_interval_spin_box_valueChanged (int /* val
 void Configuration::impl::on_split_mode_button_group_buttonClicked (int /* id */)
 {
   set_rig_invariants ();
+}
+
+void Configuration::impl::on_wavelog_test_push_button_clicked ()
+{
+  QString url = ui_->wavelog_url_edit->text ().trimmed ();
+  QString key = ui_->wavelog_key_edit->text ().trimmed ();
+  QString station = ui_->wavelog_station_edit->text ().trimmed ();
+  if (station.isEmpty ()) station = "1";
+  if (url.isEmpty () || key.isEmpty ()) {
+    ui_->wavelog_status_label->setText (tr ("Test failed: URL and API key required."));
+    ui_->wavelog_status_label->setStyleSheet ("color: #c00000;");
+    return;
+  }
+  if (!url.endsWith ('/')) url += '/';
+  url += "index.php/api/qso";
+  // Build a minimal probe — empty ADIF body, server should respond
+  // with status:created and adif_count:0.
+  QJsonObject body;
+  body["key"] = key;
+  body["station_profile_id"] = station;
+  body["type"] = "adif";
+  body["string"] = "<eor>";
+  QByteArray bytes = QJsonDocument {body}.toJson (QJsonDocument::Compact);
+
+  QProcess * p = new QProcess (this);
+  ui_->wavelog_status_label->setText (tr ("Testing %1 ...").arg (url));
+  ui_->wavelog_status_label->setStyleSheet ("color: #888;");
+  ui_->wavelog_test_push_button->setEnabled (false);
+  connect (p, QOverload<int>::of (&QProcess::finished), this,
+           [this, p](int exit_code) {
+             QByteArray out = p->readAllStandardOutput ();
+             QByteArray err = p->readAllStandardError ();
+             p->deleteLater ();
+             ui_->wavelog_test_push_button->setEnabled (true);
+             if (exit_code != 0) {
+               ui_->wavelog_status_label->setText (tr ("Test failed: %1")
+                                                   .arg (QString::fromUtf8 (err.left (200)).trimmed ()));
+               ui_->wavelog_status_label->setStyleSheet ("color: #c00000;");
+               return;
+             }
+             QJsonParseError jerr {};
+             auto d = QJsonDocument::fromJson (out, &jerr);
+             QString status = (jerr.error == QJsonParseError::NoError && d.isObject ())
+                                ? d.object ().value ("status").toString ("unknown")
+                                : QString ("unknown");
+             if (status == "created" || status == "imported") {
+               ui_->wavelog_status_label->setText (tr ("OK — server responded: %1").arg (status));
+               ui_->wavelog_status_label->setStyleSheet ("color: #008000;");
+             } else {
+               ui_->wavelog_status_label->setText (tr ("Unexpected response: %1")
+                                                   .arg (QString::fromUtf8 (out.left (200)).trimmed ()));
+               ui_->wavelog_status_label->setStyleSheet ("color: #c00000;");
+             }
+           });
+  QStringList args;
+  args << "-sS" << "--max-time" << "20"
+       << "-X" << "POST"
+       << "-H" << "Content-Type: application/json"
+       << "-A" << "JTDX-Wavelog-Test/1.0"
+       << "--data-binary" << "@-"
+       << url;
+  p->start ("curl", args);
+  if (!p->waitForStarted (3000)) {
+    ui_->wavelog_status_label->setText (tr ("Test failed: curl not available"));
+    ui_->wavelog_status_label->setStyleSheet ("color: #c00000;");
+    p->deleteLater ();
+    ui_->wavelog_test_push_button->setEnabled (true);
+    return;
+  }
+  p->write (bytes);
+  p->closeWriteChannel ();
 }
 
 void Configuration::impl::on_test_CAT_push_button_clicked ()

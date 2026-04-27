@@ -141,6 +141,11 @@ public:
   bool spot_to_psk_reporter () const;
   bool spot_to_dxsummit () const;
   bool psk_self_monitor () const;
+  bool wavelog_enabled () const;
+  QString wavelog_url () const;
+  QString wavelog_api_key () const;
+  QString wavelog_station_id () const;
+  QString wavelog_radio_name () const;
   bool prevent_spotting_false () const;
   bool filterUDP () const;
   bool send_to_eqsl () const;
