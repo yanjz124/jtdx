@@ -3876,6 +3876,19 @@ void MainWindow::note_passive_candidate(QString const& call, int prio, int score
 {
   QString base = Radio::base_callsign(call);
   if (base.length() < 3) return;
+  // Skip stations already worked on this band+mode — they shouldn't
+  // appear in the "intending to work" panel at all (#worked-before).
+  // We still allow manually-pinned entries (user override).
+  {
+    QString cn3;
+    bool b4 = false, b4bm = false;
+    m_logBook.matchCall(call, cn3, b4, b4bm, double(m_freqNominal), m_mode);
+    bool pinned = m_passiveCandidates.contains(base) && m_passiveCandidates[base].manual_pin;
+    if (b4bm && !pinned) {
+      m_passiveCandidates.remove(base);
+      return;
+    }
+  }
   PassiveCandidate &c = m_passiveCandidates[base];
   if (c.call.isEmpty()) c.call = base;
   c.prio = prio;
@@ -3900,6 +3913,15 @@ void MainWindow::note_passive_candidate(QString const& call, int prio, int score
   m_logBook.matchCall(call, cn2, b4, b4bm, double(m_freqNominal), m_mode);
   c.worked_before = b4;
   c.worked_before_band_mode = b4bm;
+  // Great-circle distance from our grid to their grid (km). Recompute
+  // each update so a refined grid (4 → 6 char) tightens the estimate.
+  if (!c.grid.isEmpty()) {
+    QString myGrid = m_config.my_grid();
+    if (!myGrid.isEmpty()) {
+      int km = m_qsoHistory.distance_km(myGrid, c.grid);
+      if (km > 0) m_stationTracker.set_distance(call, km);
+    }
+  }
 }
 
 void MainWindow::update_candidate_panel()
@@ -3907,15 +3929,33 @@ void MainWindow::update_candidate_panel()
   if (!ui->candidateTable) return;
   qint64 now = m_jtdxtime ? m_jtdxtime->currentMSecsSinceEpoch2()
                           : QDateTime::currentMSecsSinceEpoch();
-  // Decay: remove any candidate not heard from in last 5 min.
+  // Pull live cooldowns for entries still on the list.
+  for (auto it = m_passiveCandidates.begin(); it != m_passiveCandidates.end(); ++it)
+    it.value().cooldown_until_ms = m_passiveCooldown.value(it.key(), 0);
+  // Add any cooldown entries that aren't in the panel yet so user can manage them.
+  for (auto it = m_passiveCooldown.constBegin(); it != m_passiveCooldown.constEnd(); ++it) {
+    if (!m_passiveCandidates.contains(it.key())) {
+      PassiveCandidate stub;
+      stub.call = it.key();
+      stub.cooldown_until_ms = it.value();
+      stub.last_heard_ms = now;  // anchor decay
+      QString cn;
+      m_logBook.getDXCC(it.key(), cn);
+      QStringList parts = cn.split(',');
+      stub.continent = parts.value(0).trimmed();
+      stub.country = cn;
+      m_passiveCandidates.insert(it.key(), stub);
+    }
+  }
+  // Decay: remove candidates not heard in 5 min, EXCEPT pinned and on-cooldown
+  // (cooldown-only entries are preserved so the user can see/manage them).
   qint64 decay_cutoff = now - 5 * 60 * 1000;
-  // Also pull anyone in StationTracker who has CQ'd recently and isn't already in.
-  // (Lets us populate even before process_Auto scores them.)
-  // We'd need an accessor; for now just use whatever's already in the map.
   QStringList expired;
   for (auto it = m_passiveCandidates.constBegin(); it != m_passiveCandidates.constEnd(); ++it) {
-    qint64 lh = it.value().last_heard_ms;
-    if (lh > 0 && lh < decay_cutoff && !it.value().manual_pin) expired << it.key();
+    PassiveCandidate const& c = it.value();
+    if (c.manual_pin) continue;
+    if (c.cooldown_until_ms > now) continue;
+    if (c.last_heard_ms > 0 && c.last_heard_ms < decay_cutoff) expired << it.key();
   }
   for (QString const& k : expired) m_passiveCandidates.remove(k);
 
@@ -3929,10 +3969,10 @@ void MainWindow::update_candidate_panel()
 
   ui->candidateTable->setUpdatesEnabled(false);
   // Set up columns once.
-  if (ui->candidateTable->columnCount() != 8) {
-    ui->candidateTable->setColumnCount(8);
+  if (ui->candidateTable->columnCount() != 9) {
+    ui->candidateTable->setColumnCount(9);
     ui->candidateTable->setHorizontalHeaderLabels(QStringList()
-        << "#" << "Call" << "Country" << "Grid" << "SNR" << "Last" << "Score" << "Status");
+        << "#" << "Call" << "Country" << "Grid" << "Dist" << "SNR" << "Last" << "Score" << "Status");
     auto * hdr = ui->candidateTable->horizontalHeader();
     if (hdr) {
       hdr->setSectionResizeMode(0, QHeaderView::ResizeToContents);
@@ -3942,7 +3982,8 @@ void MainWindow::update_candidate_panel()
       hdr->setSectionResizeMode(4, QHeaderView::ResizeToContents);
       hdr->setSectionResizeMode(5, QHeaderView::ResizeToContents);
       hdr->setSectionResizeMode(6, QHeaderView::ResizeToContents);
-      hdr->setSectionResizeMode(7, QHeaderView::Stretch);
+      hdr->setSectionResizeMode(7, QHeaderView::ResizeToContents);
+      hdr->setSectionResizeMode(8, QHeaderView::Stretch);
     }
     ui->candidateTable->verticalHeader()->setVisible(false);
     ui->candidateTable->verticalHeader()->setDefaultSectionSize(18);
@@ -3977,14 +4018,22 @@ void MainWindow::update_candidate_panel()
       }
       ui->candidateTable->setItem(r, col, it);
     };
+    // Distance: pull live from StationTracker (kept in sync by note_passive_candidate).
+    int distKm = m_stationTracker.get(Radio::base_callsign(c.call)).distance_km;
+    QString distStr;
+    if (distKm > 0) {
+      if (m_config.miles()) distStr = QString("%1 mi").arg(int(distKm * 0.621371));
+      else distStr = QString("%1 km").arg(distKm);
+    }
     setCell(0, QString::number(r + 1), Qt::AlignCenter);
     setCell(1, c.call);
     setCell(2, c.country.isEmpty() ? "" : c.country);
     setCell(3, c.grid);
-    setCell(4, snrStr, Qt::AlignCenter);
-    setCell(5, lastStr, Qt::AlignCenter);
-    setCell(6, QString::number(c.score), Qt::AlignCenter);
-    setCell(7, status);
+    setCell(4, distStr, Qt::AlignRight | Qt::AlignVCenter);
+    setCell(5, snrStr, Qt::AlignCenter);
+    setCell(6, lastStr, Qt::AlignCenter);
+    setCell(7, QString::number(c.score), Qt::AlignCenter);
+    setCell(8, status);
 
     // Color coding: highlight currently-calling green; cooldown grey;
     // worked-priority bonus pink for new DXCC etc. Same palette as
@@ -3998,7 +4047,7 @@ void MainWindow::update_candidate_panel()
     else if (c.prio >= 5) bg = QColor("#d6f5d6");               // new call-ish — light green
     else bg = QColor();
     if (bg.isValid()) {
-      for (int col = 0; col < 8; col++) {
+      for (int col = 0; col < 9; col++) {
         auto * it = ui->candidateTable->item(r, col);
         if (it) it->setBackground(bg);
       }
@@ -4388,16 +4437,15 @@ void MainWindow::process_Auto()
           rejected_log << QString("%1:cooldown").arg(try_call);
           continue;
         }
-        // Hard skip: if the station was already worked on this band+mode
-        // they're struck through in band activity and shouldn't be picked.
-        // Same logic the user manually applied via Halt — automate it.
+        // Hard skip: stations already worked on this band+mode are struck
+        // through in band activity and aren't candidates for QSO. Skip
+        // unconditionally — the user's expectation matches the visual
+        // strike-through. (Manual override path: double-click in band
+        // activity, which goes through a different code path.)
         QString cn;
         bool wb4 = false, wb4bm = false;
         m_logBook.matchCall(try_call, cn, wb4, wb4bm, double(m_freqNominal), m_mode);
-        if (wb4bm && try_prio < 5) {
-          // worked-before-band-mode AND no special priority bonus
-          // (new DXCC etc. with prio>=5 bypass — user might want a dupe
-          // contact for an award).
+        if (wb4bm) {
           tried_skip.insert(try_call);
           rejected_log << QString("%1:worked-before").arg(try_call);
           continue;

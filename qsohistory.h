@@ -38,6 +38,9 @@ class QsoHistory
 	Status log_data(QString const& callsign, unsigned &time, QString &rrep, QString &srep);
 	unsigned last_heard(QString const& callsign) const; // time in sec-of-day when station was last decoded; 0 if unknown
 	unsigned latest_time() const { return max_r_time; }
+	// Great-circle distance in km between two Maidenhead grids (4..10 char).
+	// Returns 0 if either grid is unparseable / too short.
+	int distance_km(QString const& my_grid, QString const& his_grid);
 	int remove(QString const& callsign);		
 	int blacklist(QString const& callsign);
 	void calllist(QString const& callsign,int level, unsigned time);

@@ -378,6 +378,12 @@ void QsoHistory::time(unsigned time)
     }
 }
 
+int QsoHistory::distance_km(QString const& my_grid, QString const& his_grid)
+{
+    if (my_grid.length() < 4 || his_grid.length() < 4) return 0;
+    return Distance(fromQth(my_grid), fromQth(his_grid));
+}
+
 unsigned QsoHistory::last_heard(QString const& callsign) const
 {
     if (!_working || callsign.length() < 3) return 0;
