@@ -614,6 +614,10 @@ private:
   QHash<QString, qint64> m_passiveCooldown;  // callsign -> cooldown expiry timestamp (ms)
   QHash<QString, int> m_passiveCooldownStrikes;  // callsign -> consecutive cooldowns (exponential backoff)
   QHash<QString, PassiveCandidate> m_passiveCandidates;
+  // Live try count for the current call (UI only — process_Auto's autoseq
+  // owns the authoritative counter inside QsoHistory).
+  int m_currentTryCount = 0;
+  int m_currentMaxRetries = 0;
   StationTracker m_stationTracker;
   // Per-decode-cycle "skip these" set, populated as we reject candidates;
   // gets reset at the start of each call to passive_select_candidate().

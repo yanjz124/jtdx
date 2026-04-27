@@ -3929,9 +3929,24 @@ void MainWindow::update_candidate_panel()
   if (!ui->candidateTable) return;
   qint64 now = m_jtdxtime ? m_jtdxtime->currentMSecsSinceEpoch2()
                           : QDateTime::currentMSecsSinceEpoch();
-  // Pull live cooldowns for entries still on the list.
-  for (auto it = m_passiveCandidates.begin(); it != m_passiveCandidates.end(); ++it)
-    it.value().cooldown_until_ms = m_passiveCooldown.value(it.key(), 0);
+  QString hisBase = Radio::base_callsign(m_hisCall);
+  // Refresh volatile fields each render so the panel reflects current state
+  // even if note_passive_candidate hasn't been called for that station this
+  // cycle (e.g. during the active-call retry branch where only the current
+  // target is exercised).
+  for (auto it = m_passiveCandidates.begin(); it != m_passiveCandidates.end(); ++it) {
+    PassiveCandidate &c = it.value();
+    c.cooldown_until_ms = m_passiveCooldown.value(it.key(), 0);
+    c.currently_calling = !hisBase.isEmpty() && (hisBase == it.key());
+    StationTracker::Behavior const& b = m_stationTracker.get(it.key());
+    bool nowBusy = m_stationTracker.is_busy_now(it.key(), now)
+                   && b.currently_in_qso_with != Radio::base_callsign(m_baseCall);
+    c.busy_with_other = nowBusy;
+    c.busy_partner = nowBusy ? b.currently_in_qso_with : QString();
+    if (b.last_heard_ms > 0) c.last_heard_ms = b.last_heard_ms;
+    if (b.best_snr > -90) c.snr_best = b.best_snr;
+    if (b.avg_snr() > -90) c.snr_avg = b.avg_snr();
+  }
   // Add any cooldown entries that aren't in the panel yet so user can manage them.
   for (auto it = m_passiveCooldown.constBegin(); it != m_passiveCooldown.constEnd(); ++it) {
     if (!m_passiveCandidates.contains(it.key())) {
@@ -3998,10 +4013,19 @@ void MainWindow::update_candidate_panel()
                       : QString("%1m").arg(secsAgo / 60);
     QString snrStr = (c.snr_best > -90) ? QString("%1/%2").arg(c.snr_best).arg(c.snr_avg) : QString("?");
     QString status;
-    if (c.currently_calling) status = tr("CALLING");
-    else if (c.cooldown_until_ms > now) {
+    if (c.currently_calling) {
+      if (c.busy_with_other) status = c.busy_partner.isEmpty() ? tr("CALLING (busy)")
+                                                                : tr("CALLING [hold: → %1]").arg(c.busy_partner);
+      else if (m_currentMaxRetries > 0)
+        status = tr("CALLING try %1/%2").arg(m_currentTryCount).arg(m_currentMaxRetries);
+      else
+        status = tr("CALLING");
+    } else if (c.cooldown_until_ms > now) {
       int secs = int((c.cooldown_until_ms - now) / 1000);
-      status = tr("CD %1:%2").arg(secs / 60).arg(secs % 60, 2, 10, QChar('0'));
+      int strikes = m_passiveCooldownStrikes.value(Radio::base_callsign(c.call), 0);
+      QString cdText = QString("cooldown %1:%2").arg(secs / 60).arg(secs % 60, 2, 10, QChar('0'));
+      if (strikes > 1) cdText += tr(" (cycle %1)").arg(strikes);
+      status = cdText;
     }
     else if (c.busy_with_other) status = c.busy_partner.isEmpty() ? tr("busy") : tr("→ %1").arg(c.busy_partner);
     else if (c.manual_pin) status = tr("pinned");
@@ -4303,9 +4327,12 @@ void MainWindow::process_Auto()
           QString etaStr = (etaSec >= 60) ? QString("~%1m").arg(etaSec / 60)
                                            : QString("~%1s").arg(etaSec);
           update_autoseq_status(tr("Calling %1 [try %2/%3, %4 left]").arg(hisCall).arg(count).arg(maxRetries).arg(etaStr));
-          // Track that we attempted (StationTracker)
+          // Track that we attempted (StationTracker) and stash counts for
+          // the candidate-panel status column.
           m_stationTracker.note_we_called(Radio::base_callsign(hisCall),
                                           m_jtdxtime->currentMSecsSinceEpoch2());
+          m_currentTryCount = count;
+          m_currentMaxRetries = maxRetries;
           writeToALLTXT("Passive mode: " + hisCall + " retry " + QString::number(count) + "/" + QString::number(maxRetries));
         } else {
           // Give up - max retries reached, or region went dead

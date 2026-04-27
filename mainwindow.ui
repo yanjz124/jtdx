@@ -2464,50 +2464,6 @@ ZD8,ZD9,ZF,ZK3,ZL,ZL7,ZL8,ZL9,ZP,ZS,ZS8&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</str
              </widget>
             </item>
             <item>
-             <widget class="QPushButton" name="atuButton">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-                <horstretch>1</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="minimumSize">
-               <size>
-                <width>68</width>
-                <height>30</height>
-               </size>
-              </property>
-              <property name="toolTip">
-               <string>Trigger rig ATU tune cycle (short ATU button press via CAT). Requires Hamlib rig supporting RIG_FUNC_TUNER (e.g. Elecraft KX2/KX3/K3).</string>
-              </property>
-              <property name="text">
-               <string>ATU</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="skipCallButton">
-              <property name="sizePolicy">
-               <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-                <horstretch>1</horstretch>
-                <verstretch>0</verstretch>
-               </sizepolicy>
-              </property>
-              <property name="minimumSize">
-               <size>
-                <width>68</width>
-                <height>30</height>
-               </size>
-              </property>
-              <property name="toolTip">
-               <string>Skip current station after this TX. Puts the station on a 3-minute cooldown.</string>
-              </property>
-              <property name="text">
-               <string>Skip</string>
-              </property>
-             </widget>
-            </item>
-            <item>
              <widget class="QPushButton" name="tuneButton">
               <property name="sizePolicy">
                <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
