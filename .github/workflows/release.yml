@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: hamlib-prefix
-          key: hamlib-4.5.5-mingw64-shared-v3
+          key: hamlib-4.5.5-mingw64-shared-nomh-v4
 
       - name: Build hamlib (not in MSYS2 repos)
         if: steps.cache-hamlib.outputs.cache-hit != 'true'
@@ -72,6 +72,7 @@ jobs:
                       --enable-shared --disable-static \
                       --without-cxx-binding \
                       --disable-winradio \
+                      --disable-microham \
                       --disable-dependency-tracking \
                       LIBS="-lws2_32"
           make -j$(nproc)
