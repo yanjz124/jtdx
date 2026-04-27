@@ -244,6 +244,7 @@ set (wsjtx_CXXSRCS
   Configuration.cpp
   main.cpp
   eqsl.cpp
+  PSKSelfMonitor.cpp
   wsprnet.cpp
   WSPRBandHopping.cpp
   JTDXMessageBox.cpp

@@ -53,6 +53,7 @@
 #include "MessageClient.hpp"
 #include "wsprnet.h"
 #include "eqsl.h"
+#include "PSKSelfMonitor.h"
 #include "signalmeter.h"
 #include "HelpTextWindow.hpp"
 #include "SampleDownloader.hpp"
@@ -359,6 +360,8 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   qso_count_label {new QLabel {""}},
   wsprNet {new WSPRNet {network_manager, this}},
   Eqsl {new EQSL {network_manager, this}},
+  m_pskSelfMonitor {new PSKSelfMonitor {network_manager, this}},
+  m_pskSelfLabel {nullptr},
   m_hisCall {""},
   m_hisGrid {""},
   m_wantedCall {""}, m_wantedCountry {""}, m_wantedPrefix {""}, m_wantedGrid {""},
@@ -2701,6 +2704,18 @@ void MainWindow::createStatusBar()                           //createStatusBar
   lastlogged_label->setFrameStyle(QFrame::Panel | QFrame::Sunken);
   statusBar()->addWidget(lastlogged_label);
 
+  m_pskSelfLabel = new QLabel {tr("PSK: --")};
+  m_pskSelfLabel->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+  m_pskSelfLabel->setContentsMargins(3,1,3,1);
+  m_pskSelfLabel->setMinimumSize(QSize(180,20));
+  m_pskSelfLabel->setFrameStyle(QFrame::Panel | QFrame::Sunken);
+  m_pskSelfLabel->setToolTip(tr("PSK Reporter self-monitor: who heard your last 30 min of TX."));
+  statusBar()->addWidget(m_pskSelfLabel);
+  connect(m_pskSelfMonitor, &PSKSelfMonitor::poll_result,
+          this, &MainWindow::handlePSKSelfPollResult);
+  connect(m_pskSelfMonitor, &PSKSelfMonitor::no_spots_alert,
+          this, &MainWindow::handlePSKSelfAlert);
+
   date_label->setAlignment(Qt::AlignHCenter);
   date_label->setAlignment(Qt::AlignVCenter);
   date_label->setContentsMargins(1,1,1,1);
@@ -3126,6 +3141,47 @@ void MainWindow::on_skipCallButton_clicked()
     // Reset counter so CQ search runs immediately on next cycle
     m_counter = 0;
   }
+}
+
+void MainWindow::handlePSKSelfPollResult()
+{
+  if (!m_pskSelfLabel) return;
+  auto const& s = m_pskSelfMonitor->last_stats();
+  if (!s.valid) {
+    m_pskSelfLabel->setText(tr("PSK: --"));
+    m_pskSelfLabel->setStyleSheet(QString());
+    return;
+  }
+  QString text;
+  QString bg;
+  if (s.spot_count == 0) {
+    text = tr("PSK: 0 in %1m").arg(s.window_minutes);
+    bg = "#ff9999";  // red — nobody heard us
+  } else {
+    int mins_ago = -1;
+    if (s.latest_spot_epoch > 0) {
+      qint64 now_s = QDateTime::currentSecsSinceEpoch();
+      mins_ago = int((now_s - s.latest_spot_epoch) / 60);
+      if (mins_ago < 0) mins_ago = 0;
+    }
+    text = tr("PSK: %1 RX %2 DXCC, last %3m, best %4 dB")
+            .arg(s.unique_callsigns).arg(s.unique_dxcc)
+            .arg(mins_ago).arg(s.best_snr);
+    if (mins_ago >= 0 && mins_ago <= 5) bg = "#a8e6a3";        // green
+    else if (mins_ago > 0 && mins_ago <= 30) bg = "#ffe699";   // yellow
+    else bg = "#ff9999";                                       // red
+  }
+  m_pskSelfLabel->setText(text);
+  m_pskSelfLabel->setStyleSheet(QString("QLabel{background: %1; color: black}")
+                                .arg(Radio::convert_dark(bg, m_useDarkStyle)));
+}
+
+void MainWindow::handlePSKSelfAlert(QString const& message)
+{
+  update_autoseq_status(message);
+  if(m_config.write_decoded_debug())
+    writeToALLTXT("PSKSelfAlert: " + message);
+  QApplication::beep();
 }
 
 void MainWindow::on_atuButton_clicked()
@@ -4865,6 +4921,10 @@ void MainWindow::guiUpdate()
       } 
 
     m_transmitting = true;
+    if (m_pskSelfMonitor) {
+      m_pskSelfMonitor->note_tx();
+      m_pskSelfMonitor->set_target(m_baseCall, m_freqNominal);
+    }
     if (!m_config.tx_QSY_allowed ()) ui->TxFreqSpinBox->setDisabled(true);
     m_transmittedQSOProgress = m_QSOProgress;
     transmitDisplay (true);
@@ -4884,6 +4944,19 @@ void MainWindow::guiUpdate()
 
 //Once per second:
   if(nsec != m_sec0) {
+    // Sync PSK self-monitor enable state and target to current config / band / call.
+    if (m_pskSelfMonitor) {
+      bool want = m_config.psk_self_monitor() && !m_baseCall.isEmpty();
+      if (want != m_pskSelfMonitor->is_enabled()) {
+        m_pskSelfMonitor->set_enabled(want);
+        if (want && m_pskSelfLabel) m_pskSelfLabel->setText(tr("PSK: polling..."));
+        else if (m_pskSelfLabel) {
+          m_pskSelfLabel->setText(tr("PSK: --"));
+          m_pskSelfLabel->setStyleSheet(QString());
+        }
+      }
+      if (want) m_pskSelfMonitor->set_target(m_baseCall, m_freqNominal);
+    }
     if (m_config.watchdog() && !m_transmitting && !m_mode.startsWith ("WSPR")
         && m_idleMinutes >= m_config.watchdog () && !m_passiveMode) {
       txwatchdog (true);       // switch off Enable Tx button

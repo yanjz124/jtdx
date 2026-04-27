@@ -742,6 +742,7 @@ private:
   bool tx_QSY_allowed_;
   bool spot_to_psk_reporter_;
   bool spot_to_dxsummit_;
+  bool psk_self_monitor_;
   bool prevent_spotting_false_;
   bool filterUDP_;
   bool send_to_eqsl_;
@@ -1001,6 +1002,7 @@ bool Configuration::spot_to_psk_reporter () const
   return is_transceiver_online () && m_->spot_to_psk_reporter_;
 }
 bool Configuration::spot_to_dxsummit () const {return m_->spot_to_dxsummit_;}
+bool Configuration::psk_self_monitor () const {return m_->psk_self_monitor_;}
 bool Configuration::prevent_spotting_false () const {return m_->prevent_spotting_false_;}
 bool Configuration::filterUDP () const {return m_->filterUDP_;}
 bool Configuration::monitor_off_at_startup () const {return m_->monitor_off_at_startup_;}
@@ -2011,6 +2013,7 @@ Radio::convert_dark("#fafbfe",useDarkStyle_),Radio::convert_dark("#dcdef1",useDa
   ui_->tx_QSY_check_box->setChecked (tx_QSY_allowed_);
   ui_->psk_reporter_check_box->setChecked (spot_to_psk_reporter_);
   ui_->dxsummit_check_box->setChecked (spot_to_dxsummit_);
+  ui_->psk_self_monitor_check_box->setChecked (psk_self_monitor_);
   ui_->preventFalseUDP_check_box->setChecked (prevent_spotting_false_);
   ui_->filterUDP_check_box->setChecked (filterUDP_);
   ui_->eqsluser_edit->setText (eqsl_username_);
@@ -2427,6 +2430,7 @@ void Configuration::impl::read_settings ()
   monitor_last_used_ = settings_->value ("MonitorLastUsed", false).toBool ();
   spot_to_psk_reporter_ = settings_->value ("PSKReporter", false).toBool ();
   spot_to_dxsummit_ = settings_->value ("AllowSpotsDXSummit", false).toBool ();
+  psk_self_monitor_ = settings_->value ("PSKSelfMonitor", false).toBool ();
   prevent_spotting_false_ = settings_->value ("preventFalseUDPspots", true).toBool ();
 
   if(settings_->value ("ApplyFiltersToUDPmessages").toString()=="false" || settings_->value ("ApplyFiltersToUDPmessages").toString()=="true")
@@ -2784,6 +2788,7 @@ void Configuration::impl::write_settings ()
   settings_->setValue ("MonitorLastUsed", monitor_last_used_);
   settings_->setValue ("PSKReporter", spot_to_psk_reporter_);
   settings_->setValue ("AllowSpotsDXSummit", spot_to_dxsummit_);
+  settings_->setValue ("PSKSelfMonitor", psk_self_monitor_);
   settings_->setValue ("preventFalseUDPspots", prevent_spotting_false_);
   settings_->setValue ("ApplyFiltersToUDPmessages", filterUDP_);
   settings_->setValue ("EQSLSend", send_to_eqsl_);
@@ -3356,6 +3361,7 @@ void Configuration::impl::accept ()
   callsigns_ = ui_->callsigns_line_edit->text ();
   spot_to_psk_reporter_ = ui_->psk_reporter_check_box->isChecked ();
   spot_to_dxsummit_ = ui_->dxsummit_check_box->isChecked ();
+  psk_self_monitor_ = ui_->psk_self_monitor_check_box->isChecked ();
   prevent_spotting_false_ = ui_->preventFalseUDP_check_box->isChecked ();
   filterUDP_ =  ui_->filterUDP_check_box->isChecked ();
   if(!ui_->eqsluser_edit->text ().isEmpty () && !ui_->eqslpasswd_edit->text ().isEmpty () && !ui_->eqslnick_edit->text ().isEmpty ()) send_to_eqsl_ = ui_->eqsl_check_box->isChecked ();

@@ -60,6 +60,7 @@ class QTime;
 class WSPRBandHopping;
 class HelpTextWindow;
 class EQSL;
+class PSKSelfMonitor;
 class WSPRNet;
 class SoundOutput;
 class Modulator;
@@ -185,6 +186,8 @@ private slots:
   void on_skipCallButton_clicked();
   void on_webGuiButton_clicked(bool checked);
   void on_atuButton_clicked();
+  void handlePSKSelfPollResult();
+  void handlePSKSelfAlert(QString const& message);
   void on_actionAutoFilter_toggled(bool checked);
   void on_actionEnable_hound_mode_toggled(bool checked);
   void on_actionUse_TX_frequency_jumps_triggered(bool checked);
@@ -657,6 +660,8 @@ private:
 
   WSPRNet *wsprNet;
   EQSL *Eqsl;
+  PSKSelfMonitor *m_pskSelfMonitor;
+  class QLabel * m_pskSelfLabel;
 
   QTimer m_guiTimer;
   QTimer ptt1Timer;                 //StartTx delay
