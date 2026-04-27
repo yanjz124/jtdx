@@ -3165,14 +3165,24 @@ void MainWindow::handlePSKSelfPollResult()
   if (!m_pskSelfLabel) return;
   auto const& s = m_pskSelfMonitor->last_stats();
   if (!s.valid) {
-    m_pskSelfLabel->setText(tr("PSK: query failed"));
+    QString text = tr("PSK: query failed");
+    QString bgErr = "#cccccc";
+    if (s.error.contains("Rate-limited")) {
+      text = tr("PSK: rate-limited");
+      bgErr = "#ffc266";  // orange — recoverable, will retry in 30 min
+    } else if (s.error.contains("Empty")) {
+      text = tr("PSK: empty response");
+      bgErr = "#cccccc";
+    } else if (!s.error.isEmpty()) {
+      bgErr = "#ffb3b3";  // pinkish red — actual failure
+    }
+    m_pskSelfLabel->setText(text);
     m_pskSelfLabel->setToolTip(s.error.isEmpty()
         ? tr("PSK Reporter query failed (no detail).")
         : tr("PSK Reporter query failed: %1").arg(s.error));
     m_pskSelfLabel->setStyleSheet(QString("QLabel{background: %1; color: black}")
-                                  .arg(Radio::convert_dark("#cccccc", m_useDarkStyle)));
-    if(m_config.write_decoded_debug())
-      writeToALLTXT("PSKSelfMonitor query failed: " + s.error);
+                                  .arg(Radio::convert_dark(bgErr, m_useDarkStyle)));
+    writeToALLTXT("PSKSelfMonitor query failed: " + s.error);
     return;
   }
   m_pskSelfLabel->setToolTip(tr("PSK Reporter self-monitor: who heard your last %1 min of TX.")
