@@ -3,6 +3,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QProcess>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
@@ -31,13 +32,15 @@ namespace
   // Don't fire repeated alerts more often than this.
   qint64 const AlertDebounceMs = 10 * 60 * 1000;
   // Identify the app to PSK Reporter operators per their docs.
-  char const * const AppContact = "https://github.com/yanjz124/jtdx";
+  // Using a plain email-like value avoids URL-encoding pitfalls in Qt.
+  char const * const AppContact = "jtdx@github.com";
 }
 
 PSKSelfMonitor::PSKSelfMonitor (QNetworkAccessManager * network_manager, QObject * parent)
   : QObject {parent}
   , nam_ {network_manager}
   , reply_ {nullptr}
+  , curl_process_ {nullptr}
   , timer_ {new QTimer {this}}
   , dial_freq_hz_ {0}
   , enabled_ {false}
@@ -98,6 +101,22 @@ void PSKSelfMonitor::set_alert_threshold (int minutes)
   alert_threshold_minutes_ = minutes;
 }
 
+void PSKSelfMonitor::set_heard_continents (QHash<QString, int> const& by_continent)
+{
+  heard_continents_ = by_continent;
+  total_heard_spots_ = 0;
+  for (auto v : by_continent) total_heard_spots_ += v;
+}
+
+bool PSKSelfMonitor::continent_known_to_hear (QString const& continent) const
+{
+  // Sample-size guard: we need at least 10 spots before we trust the
+  // distribution enough to bias CQ selection. Avoids weird cases where
+  // 1 stray spot from NA makes us avoid all EU CQs.
+  if (total_heard_spots_ < 10) return false;
+  return heard_continents_.value (continent.toUpper (), 0) > 0;
+}
+
 void PSKSelfMonitor::on_timer ()
 {
   poll_now ();
@@ -124,23 +143,26 @@ QString PSKSelfMonitor::build_query_url () const
 
 void PSKSelfMonitor::poll_now ()
 {
-  if (!enabled_ || callsign_.isEmpty () || !nam_) return;
-  if (reply_) return;  // a previous request is still outstanding
-  QNetworkRequest req {QUrl {build_query_url ()}};
-  req.setHeader (QNetworkRequest::UserAgentHeader, "JTDX-PSKSelfMonitor/1.0");
-  // PSK Reporter (via Cloudflare) treats clients sending Accept-Encoding:
-  // gzip/deflate as bots and returns either HTTP 503 with a rate-limit
-  // JSON or HTTP 200 with an empty body. Qt's QNetworkAccessManager
-  // sends gzip by default — override with identity to act like curl.
-  req.setRawHeader ("Accept-Encoding", "identity");
-  req.setRawHeader ("Accept", "text/xml,application/xml");
-#if QT_VERSION >= QT_VERSION_CHECK(5, 9, 0)
-  req.setAttribute (QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
-#else
-  req.setAttribute (QNetworkRequest::FollowRedirectsAttribute, true);
-#endif
-  reply_ = nam_->get (req);
-  connect (reply_, &QNetworkReply::finished, this, &PSKSelfMonitor::on_reply);
+  if (!enabled_ || callsign_.isEmpty ()) return;
+  if (curl_process_ && curl_process_->state () != QProcess::NotRunning) return;
+  // Qt5 on Windows mishandles Cloudflare's chunked-encoded HTTPS responses
+  // for this endpoint — we get HTTP 200 with 0 bytes regardless of headers.
+  // curl is shipped with Windows 10+ (System32\curl.exe) and works reliably.
+  if (curl_process_) {
+    curl_process_->deleteLater ();
+    curl_process_ = nullptr;
+  }
+  curl_process_ = new QProcess (this);
+  connect (curl_process_, QOverload<int>::of (&QProcess::finished),
+           this, &PSKSelfMonitor::on_curl_finished);
+  QStringList args;
+  args << "-sS"             // silent but show errors
+       << "--max-time" << "20"
+       << "--retry" << "0"
+       << "-A" << "JTDX-PSKSelfMonitor/1.0"
+       << "-H" << "Accept: text/xml,application/xml"
+       << build_query_url ();
+  curl_process_->start ("curl", args);
 }
 
 PSKSelfMonitor::Stats PSKSelfMonitor::parse_reply (QByteArray const& body) const
@@ -193,6 +215,83 @@ PSKSelfMonitor::Stats PSKSelfMonitor::parse_reply (QByteArray const& body) const
     }
   }
   return s;
+}
+
+void PSKSelfMonitor::on_curl_finished (int exit_code)
+{
+  if (!curl_process_) return;
+  QProcess * p = curl_process_;
+  curl_process_ = nullptr;
+
+  QByteArray body = p->readAllStandardOutput ();
+  QByteArray err = p->readAllStandardError ();
+  int httpCode = (exit_code == 0 && !body.isEmpty ()) ? 200 : 0;
+  p->deleteLater ();
+
+  QString dir = QStandardPaths::writableLocation (QStandardPaths::AppDataLocation);
+  QDir ().mkpath (dir);
+  {
+    QString path = dir + "/psk_self_monitor_last.xml";
+    QFile f {path};
+    if (f.open (QIODevice::WriteOnly | QIODevice::Truncate)) {
+      QTextStream ts (&f);
+      ts << "<!-- " << QDateTime::currentDateTimeUtc ().toString (Qt::ISODate)
+         << " curl exit=" << exit_code
+         << " bytes=" << body.size ()
+         << " stderr=" << QString::fromUtf8 (err.left (200))
+         << " -->\n";
+      f.write (body);
+      f.close ();
+    }
+  }
+  {
+    QString path = dir + "/psk_self_monitor.log";
+    QFile f {path};
+    if (f.open (QIODevice::WriteOnly | QIODevice::Append)) {
+      QTextStream ts (&f);
+      ts << QDateTime::currentDateTimeUtc ().toString (Qt::ISODate)
+         << " curl_exit=" << exit_code
+         << " bytes=" << body.size ()
+         << " call=" << callsign_
+         << " freq=" << dial_freq_hz_;
+      if (!err.isEmpty ()) ts << " stderr=" << QString::fromUtf8 (err.left (120)).trimmed ();
+      ts << "\n";
+      f.close ();
+    }
+  }
+
+  if (exit_code != 0) {
+    Stats s;
+    s.valid = false;
+    s.window_minutes = window_minutes_;
+    s.error = QString ("curl exit %1: %2").arg (exit_code).arg (QString::fromUtf8 (err.left (200)).trimmed ());
+    last_ = s;
+    emit poll_result (last_);
+    return;
+  }
+  if (body.isEmpty ()) {
+    Stats s;
+    s.valid = false;
+    s.window_minutes = window_minutes_;
+    s.error = QString ("Empty response from PSK Reporter");
+    last_ = s;
+    emit poll_result (last_);
+    return;
+  }
+  if (body.contains ("too many queries")) {
+    Stats s;
+    s.valid = false;
+    s.window_minutes = window_minutes_;
+    s.error = QString ("Rate-limited by PSK Reporter — back off 30 min");
+    timer_->stop ();
+    QTimer::singleShot (30 * 60 * 1000, this, [this]() { if (enabled_) timer_->start (); });
+    last_ = s;
+    emit poll_result (last_);
+    return;
+  }
+  last_ = parse_reply (body);
+  emit poll_result (last_);
+  evaluate_alert (last_);
 }
 
 void PSKSelfMonitor::on_reply ()

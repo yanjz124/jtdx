@@ -3185,6 +3185,9 @@ void MainWindow::handlePSKSelfPollResult()
       if (continent.isEmpty() || continent == "??") continue;
       by_continent[continent] = by_continent.value(continent, 0) + 1;
     }
+    // Phase 4: feed the continent counts back to the monitor so process_Auto
+    // can use them as a tie-breaker when picking which CQ to answer.
+    if (m_pskSelfMonitor) m_pskSelfMonitor->set_heard_continents(by_continent);
     QStringList parts;
     for (auto it = by_continent.constBegin(); it != by_continent.constEnd(); ++it)
       parts << QString("%1×%2").arg(it.key()).arg(it.value());
@@ -3843,6 +3846,24 @@ void MainWindow::process_Auto()
         writeToALLTXT("Passive mode: skipping " + hisCall + " (on cooldown), staying in monitor");
       hisCall = "";
       m_status = QsoHistory::NONE;
+    }
+    // Phase 4: in passive mode, if the picked CQ is from a continent that
+    // PSK Reporter says hasn't heard us recently, AND it's a low-priority
+    // pick (worked-before with no "new" bonus), skip it. We want our cycles
+    // spent on stations that can actually hear us. Sample-size guarded
+    // inside continent_known_to_hear() — needs ≥10 spots before activating.
+    if (m_passiveMode && !hisCall.isEmpty() && prio <= 4 && m_pskSelfMonitor) {
+      QString cn;
+      m_logBook.getDXCC(hisCall, cn);
+      QString continent = cn.split(',').value(0).trimmed();
+      if (!continent.isEmpty()
+          && m_pskSelfMonitor->last_stats().spot_count >= 10
+          && !m_pskSelfMonitor->continent_known_to_hear(continent)) {
+        writeToALLTXT(QString("Phase 4: skipping %1 (continent %2 not in heard list, prio=%3)")
+                      .arg(hisCall).arg(continent).arg(prio));
+        hisCall = "";
+        m_status = QsoHistory::NONE;
+      }
     }
     if(m_config.write_decoded_debug()) {
       QString StrDirection = "";

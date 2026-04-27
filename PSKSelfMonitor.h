@@ -16,6 +16,7 @@
 class QNetworkAccessManager;
 class QNetworkReply;
 class QTimer;
+class QProcess;
 
 class PSKSelfMonitor : public QObject
 {
@@ -54,6 +55,13 @@ public:
   Stats const& last_stats () const { return last_; }
   qint64 last_tx_ms () const { return last_tx_ms_; }
 
+  // Feed back receiver-by-continent counts (filled in by MainWindow after
+  // its DXCC->continent lookup). Used by Phase 4 to bias CQ pick.
+  void set_heard_continents (QHash<QString, int> const& by_continent);
+  // True if continent had ≥1 spot in current window AND we have ≥10
+  // total spots (sample-size guard).
+  bool continent_known_to_hear (QString const& continent) const;
+
 signals:
   // Emitted whenever a poll completes (even with zero spots).
   void poll_result (PSKSelfMonitor::Stats const& stats);
@@ -67,6 +75,7 @@ public slots:
 
 private slots:
   void on_reply ();
+  void on_curl_finished (int exit_code);
   void on_timer ();
 
 private:
@@ -76,6 +85,7 @@ private:
 
   QNetworkAccessManager * nam_;
   QNetworkReply * reply_;
+  QProcess * curl_process_;
   QTimer * timer_;
   QString callsign_;
   qint64 dial_freq_hz_;
@@ -90,6 +100,12 @@ private:
   // Each entry is the epoch-second of one TX cycle start (matched
   // against spot flowStartSeconds with a small tolerance).
   QList<qint64> tx_epochs_;
+
+  // Continents where we've been heard recently (Phase 4). Filled in
+  // by MainWindow after DXCC→continent resolution and queried during
+  // CQ selection.
+  QHash<QString, int> heard_continents_;
+  int total_heard_spots_ = 0;
 };
 
 Q_DECLARE_METATYPE(PSKSelfMonitor::Stats)
