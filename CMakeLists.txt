@@ -1291,12 +1291,14 @@ install (TARGETS jtdxjt9 wsprd_jtdx udp_daemon_jtdx
   BUNDLE DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime
   )
 
-install (PROGRAMS
-  ${RIGCTL_EXE}
-  DESTINATION ${CMAKE_INSTALL_BINDIR}
-  #COMPONENT runtime
-  RENAME rigctl-jtdx${CMAKE_EXECUTABLE_SUFFIX}
-  )
+if (RIGCTL_EXE)
+  install (PROGRAMS
+    ${RIGCTL_EXE}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    #COMPONENT runtime
+    RENAME rigctl-jtdx${CMAKE_EXECUTABLE_SUFFIX}
+    )
+endif ()
 
 install (PROGRAMS
   ${RIGCTLD_EXE}

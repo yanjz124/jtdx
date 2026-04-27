@@ -89,9 +89,10 @@ jobs:
         run: |
           cp -r hamlib-prefix/include/hamlib /mingw64/include/
           cp hamlib-prefix/lib/libhamlib.* /mingw64/lib/ 2>/dev/null || true
-          # Shared build: copy DLL into bin and .dll.a into lib
+          # Shared build: copy DLL into bin (find_program will pick up rigctl)
           if [ -d hamlib-prefix/bin ]; then
             cp hamlib-prefix/bin/*.dll /mingw64/bin/ 2>/dev/null || true
+            cp hamlib-prefix/bin/*.exe /mingw64/bin/ 2>/dev/null || true
           fi
           if [ -f hamlib-prefix/lib/pkgconfig/hamlib.pc ]; then
             cp hamlib-prefix/lib/pkgconfig/hamlib.pc /mingw64/lib/pkgconfig/
@@ -117,7 +118,7 @@ jobs:
       - name: Install (bundle Qt + OpenSSL + Hamlib DLLs)
         run: |
           cd build
-          mingw32-make install || echo "install warnings ignored"
+          mingw32-make install
 
       - name: Determine version label
         id: version
