@@ -1,0 +1,128 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional tag/version label for manual builds'
+        required: false
+        default: 'manual'
+
+jobs:
+  build-windows:
+    name: Build Windows x64 installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2 + mingw64 toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-qt5-base
+            mingw-w64-x86_64-qt5-svg
+            mingw-w64-x86_64-qt5-multimedia
+            mingw-w64-x86_64-qt5-serialport
+            mingw-w64-x86_64-qt5-tools
+            mingw-w64-x86_64-qt5-translations
+            mingw-w64-x86_64-hamlib
+            mingw-w64-x86_64-fftw
+            mingw-w64-x86_64-libusb
+            mingw-w64-x86_64-boost
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-nsis
+            git
+            patch
+
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake -G "MinGW Makefiles" \
+                -DCMAKE_PREFIX_PATH=/mingw64 \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DWSJT_GENERATE_DOCS=OFF \
+                -DCMAKE_INSTALL_PREFIX="$(cygpath -m $(pwd))/install" \
+                ..
+
+      - name: Build
+        run: |
+          cd build
+          mingw32-make -j$(nproc)
+
+      - name: Install (bundle Qt + OpenSSL + Hamlib DLLs)
+        run: |
+          cd build
+          mingw32-make install || echo "install warnings ignored"
+
+      - name: Determine version label
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VER="${GITHUB_REF#refs/tags/}"
+          elif [[ -n "${{ inputs.tag }}" ]]; then
+            VER="${{ inputs.tag }}"
+          else
+            VER="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=${VER}" >> $GITHUB_OUTPUT
+
+      - name: Package as zip
+        run: |
+          cd build
+          ZIP="jtdx-${{ steps.version.outputs.version }}-win64.zip"
+          # Robocopy-style packaging with bash
+          cd install
+          /mingw64/bin/zip -r "../$ZIP" .
+          ls -la "../$ZIP"
+
+      - name: Build NSIS installer
+        run: |
+          cd build
+          if [ -f CPackConfig.cmake ]; then
+            /mingw64/bin/cpack -G NSIS -C Release || echo "cpack NSIS may not be configured upstream"
+          fi
+          ls -la *.exe || true
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jtdx-${{ steps.version.outputs.version }}-win64-zip
+          path: build/jtdx-${{ steps.version.outputs.version }}-win64.zip
+          retention-days: 30
+
+      - name: Upload installer artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jtdx-${{ steps.version.outputs.version }}-win64-installer
+          path: build/*.exe
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: JTDX ${{ steps.version.outputs.version }}
+          body_path: .github/RELEASE_NOTES_TEMPLATE.md
+          files: |
+            build/jtdx-${{ steps.version.outputs.version }}-win64.zip
+            build/*.exe
+          fail_on_unmatched_files: false
+          generate_release_notes: true
