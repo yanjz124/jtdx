@@ -4679,7 +4679,21 @@ void MainWindow::readFromStdout()                             //readFromStdout
 	    if (!dxbasecall.isEmpty () && message_words.at (2).contains (dxbasecall) && message_words.at (3).contains ("73")) bdxcall73 = true;
 	  }
 	  
-      if (qAbs(decodedtext.frequencyOffset() - m_wideGraph->rxFreq()) <= 10 || (m_showMyCallMsgRxWindow && mycallinmsg) || bcontent || bdxcall73 || (m_showWantedCallRxWindow && notified & 8) || cooldownBreakthrough) {
+      // Always include messages involving our current DX target (our QSO partner),
+      // regardless of frequency — we want to see the full conversation in the
+      // Rx Frequency window even if their TX freq drifts off our RX or someone
+      // else mentions them. Match either the sender (deCall) or target call.
+      bool involvesDX = false;
+      if (!m_hisCall.isEmpty()) {
+        QString dxBase = Radio::base_callsign(m_hisCall);
+        if (!dxBase.isEmpty() &&
+            (Radio::base_callsign(deCall) == dxBase ||
+             Radio::base_callsign(decodedtext.call()) == dxBase ||
+             decodedtextmsg.contains(dxBase))) {
+          involvesDX = true;
+        }
+      }
+      if (qAbs(decodedtext.frequencyOffset() - m_wideGraph->rxFreq()) <= 10 || (m_showMyCallMsgRxWindow && mycallinmsg) || bcontent || bdxcall73 || (m_showWantedCallRxWindow && notified & 8) || cooldownBreakthrough || involvesDX) {
 
         if(m_bypassRxfFilters || dec_data.params.nagain==1 || dec_data.params.nagainfil==1) 
 			bypassRxfFilters = true;
