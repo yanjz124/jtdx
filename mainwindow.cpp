@@ -3729,6 +3729,11 @@ int MainWindow::passive_score_candidate(QString const& call, int prio,
   if (call.isEmpty()) return score;
   QString base = Radio::base_callsign(call);
 
+  // Manual pin: massive score so it always wins over auto-picked candidates.
+  if (m_passiveCandidates.contains(base) && m_passiveCandidates[base].manual_pin) {
+    return 10000;
+  }
+
   StationTracker::Behavior const& b = m_stationTracker.get(base);
   qint64 now = m_jtdxtime->currentMSecsSinceEpoch2();
 
@@ -3888,6 +3893,13 @@ void MainWindow::note_passive_candidate(QString const& call, int prio, int score
   c.busy_partner = c.busy_with_other ? b.currently_in_qso_with : QString();
   c.cooldown_until_ms = m_passiveCooldown.value(base, 0);
   c.currently_calling = (Radio::base_callsign(m_hisCall) == base);
+  // Worked-before lookup so the candidate table can strike through known
+  // contacts and the selection logic can skip them on this band+mode.
+  QString cn2;
+  bool b4 = false, b4bm = false;
+  m_logBook.matchCall(call, cn2, b4, b4bm, double(m_freqNominal), m_mode);
+  c.worked_before = b4;
+  c.worked_before_band_mode = b4bm;
 }
 
 void MainWindow::update_candidate_panel()
@@ -3957,6 +3969,12 @@ void MainWindow::update_candidate_panel()
     auto setCell = [&](int col, QString const& text, Qt::Alignment align = Qt::AlignLeft | Qt::AlignVCenter) {
       QTableWidgetItem * it = new QTableWidgetItem(text);
       it->setTextAlignment(int(align));
+      // Strike through worked-before-band-mode (matches band activity style).
+      if (c.worked_before_band_mode) {
+        QFont f = it->font();
+        f.setStrikeOut(true);
+        it->setFont(f);
+      }
       ui->candidateTable->setItem(r, col, it);
     };
     setCell(0, QString::number(r + 1), Qt::AlignCenter);
@@ -3996,23 +4014,41 @@ void MainWindow::on_candidateTable_doubleClicked(int row)
   if (!item) return;
   QString call = item->text();
   if (call.isEmpty()) return;
-  // Manual-pin: mark this candidate as pinned and set as DX call.
   QString base = Radio::base_callsign(call);
-  if (m_passiveCandidates.contains(base)) {
-    // Clear other pins
-    for (auto it = m_passiveCandidates.begin(); it != m_passiveCandidates.end(); ++it)
-      it.value().manual_pin = false;
+  // Mark as pinned (clear any existing pin first).
+  for (auto it = m_passiveCandidates.begin(); it != m_passiveCandidates.end(); ++it)
+    it.value().manual_pin = false;
+  if (!m_passiveCandidates.contains(base)) {
+    // Add a stub entry so the pin sticks even before next decode.
+    PassiveCandidate c;
+    c.call = base;
+    c.manual_pin = true;
+    c.score = 10000;
+    c.last_heard_ms = m_jtdxtime->currentMSecsSinceEpoch2();
+    m_passiveCandidates.insert(base, c);
+  } else {
     m_passiveCandidates[base].manual_pin = true;
   }
   // Take the station off cooldown if it was — user explicitly asked to call.
   m_passiveCooldown.remove(base);
   m_passiveCooldownStrikes.remove(base);
   passive_save_cooldowns();
-  // Set as DX call, let process_Auto pick up next cycle.
+  // Clear any in-flight call so the bot doesn't keep transmitting to the
+  // old target while we're switching.
+  if (!m_hisCall.isEmpty() && Radio::base_callsign(m_hisCall) != base) {
+    haltTx(QString(" pin override: switching from %1 to %2").arg(m_hisCall).arg(call));
+    clearDXfields(QString(" cleared, manual pin override"));
+  }
+  // Set as DX call directly so the next decode cycle (or the upcoming
+  // process_Auto) sees it. Setting the entry text triggers
+  // on_dxCallEntry_textChanged which sets m_hisCall.
   ui->dxCallEntry->setText(call);
   m_processAuto_done = false;
   writeToALLTXT(QString("Manual pin: %1 set as DX call from candidate panel").arg(call));
-  update_autoseq_status(tr("Manually selected %1").arg(call));
+  update_autoseq_status(tr("Manually pinned %1 (top priority)").arg(call));
+  // Drive process_Auto immediately so we don't have to wait for the next
+  // decode cycle to switch to the pinned target.
+  if (m_autoseq) process_Auto();
   update_candidate_panel();
 }
 
@@ -4352,9 +4388,21 @@ void MainWindow::process_Auto()
           rejected_log << QString("%1:cooldown").arg(try_call);
           continue;
         }
-        // Region check (Phase 4 — only blocks worked-before basics)
+        // Hard skip: if the station was already worked on this band+mode
+        // they're struck through in band activity and shouldn't be picked.
+        // Same logic the user manually applied via Halt — automate it.
         QString cn;
-        m_logBook.getDXCC(try_call, cn);
+        bool wb4 = false, wb4bm = false;
+        m_logBook.matchCall(try_call, cn, wb4, wb4bm, double(m_freqNominal), m_mode);
+        if (wb4bm && try_prio < 5) {
+          // worked-before-band-mode AND no special priority bonus
+          // (new DXCC etc. with prio>=5 bypass — user might want a dupe
+          // contact for an award).
+          tried_skip.insert(try_call);
+          rejected_log << QString("%1:worked-before").arg(try_call);
+          continue;
+        }
+        // Region check (Phase 4 — only blocks worked-before basics)
         QString continent = cn.split(',').value(0).trimmed();
         if (!continent.isEmpty()) m_stationTracker.set_continent(try_call, continent);
         QString skip_reason;

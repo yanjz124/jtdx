@@ -299,7 +299,7 @@
           <property name="sizePolicy">
            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
             <horstretch>0</horstretch>
-            <verstretch>7</verstretch>
+            <verstretch>8</verstretch>
            </sizepolicy>
           </property>
           <property name="minimumSize">
@@ -333,13 +333,13 @@
           <property name="sizePolicy">
            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
             <horstretch>0</horstretch>
-            <verstretch>3</verstretch>
+            <verstretch>2</verstretch>
            </sizepolicy>
           </property>
           <property name="minimumSize">
            <size>
             <width>200</width>
-            <height>140</height>
+            <height>100</height>
            </size>
           </property>
           <property name="toolTip">

@@ -106,6 +106,8 @@ public:
     qint64 cooldown_until_ms = 0;  // 0 if not on cooldown
     bool manual_pin = false;       // double-clicked: stay at top
     int color_priority = 0;        // for color-coding (mirrors displaytext priority)
+    bool worked_before = false;          // any band/mode
+    bool worked_before_band_mode = false;// this band+mode (strike-through trigger)
   };
 
 public slots:
