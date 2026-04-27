@@ -60,14 +60,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: hamlib-prefix
-          key: hamlib-4.5.5-mingw64-winsock-v6
+          key: hamlib-4.6.2-mingw64-v7
 
       - name: Build hamlib (not in MSYS2 repos)
         if: steps.cache-hamlib.outputs.cache-hit != 'true'
         run: |
-          curl -sSL https://github.com/Hamlib/Hamlib/releases/download/4.5.5/hamlib-4.5.5.tar.gz -o hamlib.tar.gz
+          curl -sSL https://github.com/Hamlib/Hamlib/releases/download/4.6.2/hamlib-4.6.2.tar.gz -o hamlib.tar.gz
           tar xzf hamlib.tar.gz
-          cd hamlib-4.5.5
+          cd hamlib-4.6.2
           # Force winsock2.h inclusion ahead of windows.h for every TU so
           # all of hamlib's src/*.c files see fd_set/FD_SET/select/etc.
           # without each one needing manual patches.
