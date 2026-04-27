@@ -773,7 +773,9 @@ find_package (Qt5 COMPONENTS Widgets SerialPort Multimedia LinguistTools WebSock
 
 if (WIN32)
   add_definitions (-DQT_NEEDS_QTMAIN)
-  find_package (Qt5AxContainer REQUIRED)
+  if (NOT JTDX_SKIP_OMNIRIG)
+    find_package (Qt5AxContainer REQUIRED)
+  endif ()
 endif (WIN32)
 
 #
