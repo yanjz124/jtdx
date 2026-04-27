@@ -31,8 +31,35 @@ from datetime import datetime, timezone
 
 MAGIC = 0xadbccbda
 SCHEMA = 3
-DEFAULT_HOST = os.environ.get("JTDX_HOST", "127.0.0.1")
-DEFAULT_PORT = int(os.environ.get("JTDX_PORT", "2237"))
+def _read_jtdx_ini():
+    """Read host/port from the live JTDX.ini so we don't have to hardcode."""
+    candidates = [
+        os.path.expandvars(r"%LOCALAPPDATA%\JTDX\JTDX.ini"),
+        os.path.expandvars(r"%APPDATA%\JTDX\JTDX.ini"),
+        os.path.expanduser("~/.config/JTDX/JTDX.ini"),
+    ]
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        host, port = None, None
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("UDPServer="):
+                        host = line.split("=", 1)[1].strip()
+                    elif line.startswith("UDPServerPort="):
+                        port = int(line.split("=", 1)[1].strip())
+        except Exception:
+            continue
+        if host and port:
+            return host, port, path
+    return None, None, None
+
+
+_ini_host, _ini_port, _ini_path = _read_jtdx_ini()
+DEFAULT_HOST = os.environ.get("JTDX_HOST", _ini_host or "127.0.0.1")
+DEFAULT_PORT = int(os.environ.get("JTDX_PORT", _ini_port or 2237))
 
 MSG_NAMES = {
     0: "Heartbeat", 1: "Status", 2: "Decode", 3: "Clear", 4: "Reply",

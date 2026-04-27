@@ -10,6 +10,10 @@
 #include <QXmlStreamReader>
 #include <QSet>
 #include <QDebug>
+#include <QStandardPaths>
+#include <QDir>
+#include <QFile>
+#include <QTextStream>
 
 #include "moc_PSKSelfMonitor.cpp"
 
@@ -124,7 +128,12 @@ void PSKSelfMonitor::poll_now ()
   if (reply_) return;  // a previous request is still outstanding
   QNetworkRequest req {QUrl {build_query_url ()}};
   req.setHeader (QNetworkRequest::UserAgentHeader, "JTDX-PSKSelfMonitor/1.0");
-  // Cloudflare 301-redirects HTTP→HTTPS; tell Qt to follow.
+  // PSK Reporter (via Cloudflare) treats clients sending Accept-Encoding:
+  // gzip/deflate as bots and returns either HTTP 503 with a rate-limit
+  // JSON or HTTP 200 with an empty body. Qt's QNetworkAccessManager
+  // sends gzip by default — override with identity to act like curl.
+  req.setRawHeader ("Accept-Encoding", "identity");
+  req.setRawHeader ("Accept", "text/xml,application/xml");
 #if QT_VERSION >= QT_VERSION_CHECK(5, 9, 0)
   req.setAttribute (QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
 #else
@@ -208,14 +217,60 @@ void PSKSelfMonitor::on_reply ()
   }
   QByteArray body = r->readAll ();
   int httpCode = r->attribute (QNetworkRequest::HttpStatusCodeAttribute).toInt ();
+  QUrl finalUrl = r->url ();
   r->deleteLater ();
-  if (body.isEmpty () || !body.contains ("<receptionReports")) {
-    qWarning () << "PSKSelfMonitor: unexpected response, HTTP=" << httpCode
-                << " body[0..200]=" << body.left (200);
+
+  QString dir = QStandardPaths::writableLocation (QStandardPaths::AppDataLocation);
+  QDir ().mkpath (dir);
+  // Always dump the raw response to a debug log so failures are diagnosable
+  // without rebuilding. Rotates: keep last response only.
+  {
+    QString path = dir + "/psk_self_monitor_last.xml";
+    QFile f {path};
+    if (f.open (QIODevice::WriteOnly | QIODevice::Truncate)) {
+      QTextStream ts (&f);
+      ts << "<!-- " << QDateTime::currentDateTimeUtc ().toString (Qt::ISODate)
+         << " HTTP " << httpCode
+         << " URL=" << finalUrl.toString ()
+         << " bytes=" << body.size () << " -->\n";
+      f.write (body);
+      f.close ();
+    }
+  }
+  // Append a one-line summary to a rolling log so we have history without
+  // needing the global "decoded and debug messages" checkbox enabled.
+  {
+    QString path = dir + "/psk_self_monitor.log";
+    QFile f {path};
+    if (f.open (QIODevice::WriteOnly | QIODevice::Append)) {
+      QTextStream ts (&f);
+      ts << QDateTime::currentDateTimeUtc ().toString (Qt::ISODate)
+         << " HTTP=" << httpCode
+         << " bytes=" << body.size ()
+         << " call=" << callsign_
+         << " freq=" << dial_freq_hz_
+         << "\n";
+      f.close ();
+    }
+  }
+
+  if (httpCode >= 400 || body.isEmpty ()) {
+    qWarning () << "PSKSelfMonitor: bad response, HTTP=" << httpCode
+                << " bytes=" << body.size ()
+                << " preview=" << body.left (200);
     Stats s;
     s.valid = false;
     s.window_minutes = window_minutes_;
-    s.error = QString ("Unexpected response (HTTP %1): %2").arg (httpCode).arg (QString::fromUtf8 (body.left (120)));
+    if (httpCode == 503 && body.contains ("too many queries")) {
+      s.error = QString ("Rate-limited by PSK Reporter — back off 30 min");
+      // Pause polling for 30 minutes to respect their rate limit.
+      timer_->stop ();
+      QTimer::singleShot (30 * 60 * 1000, this, [this]() { if (enabled_) timer_->start (); });
+    } else if (body.isEmpty ()) {
+      s.error = QString ("Empty response (HTTP %1)").arg (httpCode);
+    } else {
+      s.error = QString ("HTTP %1: %2").arg (httpCode).arg (QString::fromUtf8 (body.left (120)));
+    }
     last_ = s;
     emit poll_result (last_);
     return;

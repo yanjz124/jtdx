@@ -2256,9 +2256,10 @@ void MainWindow::on_enableTxButton_clicked (bool checked)
 }
 
 void MainWindow::enableTx_mode (bool state) {
-  if (m_passiveMode && !state && m_config.write_decoded_debug()) {
-    writeToALLTXT("Passive mode: Enable TX being set to OFF (programmatic)");
-  }
+  // Log every programmatic enable/disable unconditionally so we can debug
+  // unwanted-TX scenarios without needing the global debug checkbox on.
+  writeToALLTXT(QString("enableTx_mode(%1) called, passiveMode=%2 enableTx=%3 passiveUserDisabled=%4 transmitting=%5")
+                .arg(state).arg(m_passiveMode).arg(m_enableTx).arg(m_passiveTxUserDisabled).arg(m_transmitting));
   m_programmaticEnableTx = true;
   ui->enableTxButton->setChecked (state); on_enableTxButton_clicked (state);
   m_programmaticEnableTx = false;
@@ -3115,12 +3116,10 @@ void MainWindow::on_actionPassiveMode_toggled(bool checked)
     txwatchdog(false);
   }
   if (!checked) {
-    // Turning off passive mode: clear cooldowns and ensure TX is usable
+    // Turning off passive mode: clear cooldowns. Don't force-enable TX —
+    // that would override the user's TX-off choice and cause unwanted
+    // transmissions. The button works for manual enable.
     m_passiveCooldown.clear();
-    if (!m_enableTx && !m_tune) {
-      enableTx_mode(true);
-      txwatchdog(false);
-    }
   }
 }
 
