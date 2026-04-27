@@ -3148,15 +3148,20 @@ void MainWindow::handlePSKSelfPollResult()
   if (!m_pskSelfLabel) return;
   auto const& s = m_pskSelfMonitor->last_stats();
   if (!s.valid) {
-    m_pskSelfLabel->setText(tr("PSK: --"));
-    m_pskSelfLabel->setStyleSheet(QString());
+    m_pskSelfLabel->setText(tr("PSK: query failed"));
+    m_pskSelfLabel->setStyleSheet(QString("QLabel{background: %1; color: black}")
+                                  .arg(Radio::convert_dark("#cccccc", m_useDarkStyle)));
     return;
   }
   QString text;
   QString bg;
+  int pct = (s.tx_count > 0) ? (100 * s.tx_heard_count / s.tx_count) : -1;
   if (s.spot_count == 0) {
-    text = tr("PSK: 0 in %1m").arg(s.window_minutes);
-    bg = "#ff9999";  // red — nobody heard us
+    if (pct >= 0)
+      text = tr("PSK: 0/%1 TX heard in %2m").arg(s.tx_count).arg(s.window_minutes);
+    else
+      text = tr("PSK: 0 in %1m").arg(s.window_minutes);
+    bg = "#ff9999";
   } else {
     int mins_ago = -1;
     if (s.latest_spot_epoch > 0) {
@@ -3164,12 +3169,18 @@ void MainWindow::handlePSKSelfPollResult()
       mins_ago = int((now_s - s.latest_spot_epoch) / 60);
       if (mins_ago < 0) mins_ago = 0;
     }
-    text = tr("PSK: %1 RX %2 DXCC, last %3m, best %4 dB")
-            .arg(s.unique_callsigns).arg(s.unique_dxcc)
-            .arg(mins_ago).arg(s.best_snr);
-    if (mins_ago >= 0 && mins_ago <= 5) bg = "#a8e6a3";        // green
-    else if (mins_ago > 0 && mins_ago <= 30) bg = "#ffe699";   // yellow
-    else bg = "#ff9999";                                       // red
+    if (pct >= 0)
+      text = tr("PSK: %1/%2 TX (%3%%) %4 RX %5 DXCC last %6m best %7 dB")
+              .arg(s.tx_heard_count).arg(s.tx_count).arg(pct)
+              .arg(s.unique_callsigns).arg(s.unique_dxcc)
+              .arg(mins_ago).arg(s.best_snr);
+    else
+      text = tr("PSK: %1 RX %2 DXCC last %3m best %4 dB")
+              .arg(s.unique_callsigns).arg(s.unique_dxcc)
+              .arg(mins_ago).arg(s.best_snr);
+    if (mins_ago >= 0 && mins_ago <= 5) bg = "#a8e6a3";
+    else if (mins_ago > 0 && mins_ago <= 30) bg = "#ffe699";
+    else bg = "#ff9999";
   }
   m_pskSelfLabel->setText(text);
   m_pskSelfLabel->setStyleSheet(QString("QLabel{background: %1; color: black}")

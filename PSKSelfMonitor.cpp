@@ -48,7 +48,16 @@ PSKSelfMonitor::PSKSelfMonitor (QNetworkAccessManager * network_manager, QObject
 
 void PSKSelfMonitor::note_tx ()
 {
-  last_tx_ms_ = QDateTime::currentMSecsSinceEpoch ();
+  qint64 now_ms = QDateTime::currentMSecsSinceEpoch ();
+  last_tx_ms_ = now_ms;
+  qint64 now_s = now_ms / 1000;
+  // Avoid recording duplicate TXs from the same period (we get called
+  // multiple times per second in some code paths).
+  if (!tx_epochs_.isEmpty () && now_s - tx_epochs_.last () < 5) return;
+  tx_epochs_.append (now_s);
+  // Trim to the look-back window (plus a little slack).
+  qint64 cutoff = now_s - qint64 (window_minutes_) * 60 - 60;
+  while (!tx_epochs_.isEmpty () && tx_epochs_.first () < cutoff) tx_epochs_.removeFirst ();
 }
 
 void PSKSelfMonitor::set_target (QString const& callsign, qint64 dial_freq_hz)
@@ -66,8 +75,15 @@ void PSKSelfMonitor::set_enabled (bool on)
 {
   if (enabled_ == on) return;
   enabled_ = on;
-  if (on) timer_->start ();
-  else timer_->stop ();
+  if (on) {
+    timer_->start ();
+    // Don't wait the full interval for the first poll — fire after a
+    // short delay so the user sees a result quickly. Delay lets the
+    // dial frequency / callsign settle if just turned on.
+    QTimer::singleShot (3000, this, &PSKSelfMonitor::poll_now);
+  } else {
+    timer_->stop ();
+  }
 }
 
 void PSKSelfMonitor::set_alert_threshold (int minutes)
@@ -117,6 +133,8 @@ PSKSelfMonitor::Stats PSKSelfMonitor::parse_reply (QByteArray const& body) const
   s.window_minutes = window_minutes_;
   s.valid = true;
   QSet<QString> calls, dxcc;
+  // Collect every spot's flowStartSeconds for TX-match computation.
+  QList<qint64> spot_epochs;
   QXmlStreamReader xml {body};
   while (!xml.atEnd () && !xml.hasError ()) {
     auto t = xml.readNext ();
@@ -127,15 +145,36 @@ PSKSelfMonitor::Stats PSKSelfMonitor::parse_reply (QByteArray const& body) const
     QString rxc = a.value ("receiverCallsign").toString ();
     if (!rxc.isEmpty ()) calls.insert (rxc);
     QString rxdxcc = a.value ("receiverDXCCCode").toString ();
-    if (!rxdxcc.isEmpty ()) dxcc.insert (rxdxcc);
+    if (!rxdxcc.isEmpty ()) {
+      dxcc.insert (rxdxcc);
+      s.by_dxcc[rxdxcc] = s.by_dxcc.value (rxdxcc, 0) + 1;
+    }
     bool ok = false;
     int snr = a.value ("sNR").toInt (&ok);
     if (ok && snr > s.best_snr) s.best_snr = snr;
     qint64 fss = a.value ("flowStartSeconds").toLongLong (&ok);
-    if (ok && fss > s.latest_spot_epoch) s.latest_spot_epoch = fss;
+    if (ok) {
+      if (fss > s.latest_spot_epoch) s.latest_spot_epoch = fss;
+      spot_epochs.append (fss);
+    }
   }
   s.unique_callsigns = calls.size ();
   s.unique_dxcc = dxcc.size ();
+
+  // Phase 2: count how many of our recent TX cycles were heard by anyone.
+  // Tolerance ±60s so TR-period mismatches and decoder lag don't cause
+  // false negatives; safe because TX cycles are at least 7.5s apart.
+  qint64 now_s = QDateTime::currentSecsSinceEpoch ();
+  qint64 cutoff = now_s - qint64 (window_minutes_) * 60;
+  s.tx_count = 0;
+  s.tx_heard_count = 0;
+  for (qint64 tx : tx_epochs_) {
+    if (tx < cutoff) continue;
+    s.tx_count++;
+    for (qint64 sp : spot_epochs) {
+      if (qAbs (sp - tx) <= 60) { s.tx_heard_count++; break; }
+    }
+  }
   return s;
 }
 
@@ -146,9 +185,15 @@ void PSKSelfMonitor::on_reply ()
   reply_ = nullptr;
 
   if (r->error () != QNetworkReply::NoError) {
-    qWarning () << "PSKSelfMonitor: query failed:" << r->errorString ();
+    QString err = r->errorString ();
+    qWarning () << "PSKSelfMonitor: query failed:" << err;
     r->deleteLater ();
-    // Don't update last_ on transport error — we just keep the previous result.
+    // Mark stats invalid and notify UI so the label doesn't get stuck.
+    Stats s;
+    s.valid = false;
+    s.window_minutes = window_minutes_;
+    last_ = s;
+    emit poll_result (last_);
     return;
   }
   QByteArray body = r->readAll ();

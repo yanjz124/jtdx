@@ -9,6 +9,8 @@
 #include <QObject>
 #include <QString>
 #include <QSet>
+#include <QHash>
+#include <QList>
 
 class QNetworkAccessManager;
 class QNetworkReply;
@@ -27,6 +29,10 @@ public:
     qint64 latest_spot_epoch = 0;   // max flowStartSeconds (Unix epoch)
     int window_minutes = 30;        // look-back window queried
     bool valid = false;             // false if request failed
+    int tx_count = 0;               // TXs recorded in window
+    int tx_heard_count = 0;         // TXs that matched at least one spot
+    QHash<QString, int> by_dxcc;    // receiverDXCCCode -> spots
+    QHash<QString, int> by_continent; // 2-letter continent -> spots (best-effort)
   };
 
   explicit PSKSelfMonitor (QNetworkAccessManager * network_manager, QObject * parent = nullptr);
@@ -77,6 +83,11 @@ private:
   qint64 last_tx_ms_;
   qint64 last_alert_ms_;
   Stats last_;
+
+  // Recent TX records used to compute "% TXs heard" in Phase 2.
+  // Each entry is the epoch-second of one TX cycle start (matched
+  // against spot flowStartSeconds with a small tolerance).
+  QList<qint64> tx_epochs_;
 };
 
 Q_DECLARE_METATYPE(PSKSelfMonitor::Stats)
