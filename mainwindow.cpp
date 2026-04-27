@@ -4068,15 +4068,18 @@ void MainWindow::process_Auto()
     // Passive mode: clean up expired cooldowns before searching CQs
     if (m_passiveMode && !m_passiveCooldown.isEmpty()) {
       auto now = m_jtdxtime->currentMSecsSinceEpoch2();
-      QMutableHashIterator<QString, qint64> it(m_passiveCooldown);
-      while (it.hasNext()) {
-        it.next();
-        if (now >= it.value()) {
-          it.remove();
-          m_passiveCooldownStrikes.remove(it.key());
-        }
+      // Two-pass: collect expired keys first, THEN remove. Avoids the
+      // iterator-after-remove undefined-behavior crash that the previous
+      // single-pass version triggered when reading it.key() post-remove.
+      QStringList expired;
+      for (auto it = m_passiveCooldown.constBegin(); it != m_passiveCooldown.constEnd(); ++it) {
+        if (now >= it.value()) expired << it.key();
       }
-      passive_save_cooldowns();
+      for (QString const& k : expired) {
+        m_passiveCooldown.remove(k);
+        m_passiveCooldownStrikes.remove(k);
+      }
+      if (!expired.isEmpty()) passive_save_cooldowns();
     }
     // Iterative candidate selection — autoseq picks the highest-priority
     // candidate; we apply our extra filters (cooldown, region, busy, retry
