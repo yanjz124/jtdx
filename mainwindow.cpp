@@ -4568,6 +4568,23 @@ void MainWindow::process_Auto()
     if (!hisCall.isEmpty ()) {
       if (m_callToClipboard) clipboard->setText(hisCall);
       ui->dxCallEntry->setText(hisCall);
+      // TX-slot synchronization: pick the opposite slot from the station
+      // we're answering so we don't transmit at the same time. autoseq
+      // returned 'time' as the seconds-of-day of their last decode; the
+      // even/odd slot is determined by time mod (2*TRperiod). Same logic
+      // as doubleClickOnCall but applied automatically when autoseq picks
+      // a candidate. Skip if user has TxFirst manually locked.
+      if (!m_lockTxFreq && m_TRperiod > 0 && time > 0 && !m_transmitting) {
+        int nmod = int(fmod(double(time), 2.0 * m_TRperiod));
+        bool wantTxFirst = (nmod != 0);
+        if (m_txFirst != wantTxFirst) {
+          if (m_config.write_decoded_debug())
+            writeToALLTXT(QString("TX slot sync: %1 decoded at t=%2 nmod=%3, switching txFirst %4 -> %5")
+                          .arg(hisCall).arg(time).arg(nmod).arg(m_txFirst).arg(wantTxFirst));
+          m_txFirst = wantTxFirst;
+          ui->TxMinuteButton->setChecked(m_txFirst);
+        }
+      }
       if(m_mode=="JT9+JT65" && m_modeTx != mode) {
       m_modeTx = mode;
       if (m_modeTx == "JT9") ui->pbTxMode->setText("Tx JT9  @");
@@ -5064,7 +5081,16 @@ void MainWindow::readFromStdout()                             //readFromStdout
           involvesDX = true;
         }
       }
-      if (qAbs(decodedtext.frequencyOffset() - m_wideGraph->rxFreq()) <= 10 || (m_showMyCallMsgRxWindow && mycallinmsg) || bcontent || bdxcall73 || (m_showWantedCallRxWindow && notified & 8) || cooldownBreakthrough || involvesDX) {
+      // Also include CQs in passive mode when we don't have an active QSO —
+      // by the time autoseq picks one of them as our DX, the decode is
+      // already past, so we need to show them proactively. This way the
+      // CQ that triggered the call IS in the Rx Frequency window.
+      bool isCqInPassive = false;
+      if (m_passiveMode && m_hisCall.isEmpty()) {
+        bool isCq = decodedtextmsg.startsWith("CQ ") || decodedtextmsg.contains(" CQ ");
+        if (isCq) isCqInPassive = true;
+      }
+      if (qAbs(decodedtext.frequencyOffset() - m_wideGraph->rxFreq()) <= 10 || (m_showMyCallMsgRxWindow && mycallinmsg) || bcontent || bdxcall73 || (m_showWantedCallRxWindow && notified & 8) || cooldownBreakthrough || involvesDX || isCqInPassive) {
 
         if(m_bypassRxfFilters || dec_data.params.nagain==1 || dec_data.params.nagainfil==1) 
 			bypassRxfFilters = true;

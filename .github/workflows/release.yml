@@ -68,7 +68,8 @@ jobs:
           ./configure --prefix=$(cygpath -m $(pwd))/../hamlib-prefix \
                       --disable-shared --enable-static \
                       --without-cxx-binding \
-                      --disable-winradio
+                      --disable-winradio \
+                      --disable-dependency-tracking
           make -j$(nproc)
           make install
 
