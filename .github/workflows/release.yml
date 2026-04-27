@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: hamlib-prefix
-          key: hamlib-4.6.2-mingw64-perfile-v8
+          key: hamlib-4.6.2-mingw64-perfile-iphlpapi-v9
 
       - name: Build hamlib (not in MSYS2 repos)
         if: steps.cache-hamlib.outputs.cache-hit != 'true'
@@ -81,7 +81,7 @@ jobs:
                       --without-cxx-binding \
                       --disable-winradio \
                       --disable-dependency-tracking \
-                      LIBS="-lws2_32"
+                      LIBS="-lws2_32 -liphlpapi"
           make -j$(nproc)
           make install
 
