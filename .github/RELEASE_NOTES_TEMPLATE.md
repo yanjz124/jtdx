@@ -21,7 +21,6 @@ Personal fork of [JTDX](https://github.com/jtdx-project/jtdx) with passive-mode 
 ### Integrations
 - **PSK Reporter self-monitor** — periodic poll of pskreporter.info for reception reports of your callsign. Status box at the bottom of the main window with TX-success rate (X/N TX heard %), unique RX count, DXCC count, last-spot age, best SNR, continent breakdown. Audible alert if nobody hears you despite recent TX.
 - **Wavelog direct upload** — POSTs each logged QSO directly to a Wavelog server. Replaces the need for a separate WaveLogGate process. Reads existing WaveLogGate `config.json` automatically on first run; full UI in Settings → Reporting (URL, API key, station ID, radio name, Test button).
-- **Elecraft ATU + auto-tune on band change** — Hamlib `RIG_FUNC_TUNER` with raw `SWT20;` CAT fallback for backends that don't implement it. Optional auto-trigger on band change (Settings → Radio).
 
 ### Observability
 - `enableTx_mode()` calls always log to `ALL.TXT` for diagnosing unwanted-TX scenarios.
