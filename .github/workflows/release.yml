@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: hamlib-prefix
-          key: hamlib-4.5.5-mingw64-shared-nomh-v4
+          key: hamlib-4.5.5-mingw64-shared-mhpatch-v5
 
       - name: Build hamlib (not in MSYS2 repos)
         if: steps.cache-hamlib.outputs.cache-hit != 'true'
@@ -68,12 +68,17 @@ jobs:
           curl -sSL https://github.com/Hamlib/Hamlib/releases/download/4.5.5/hamlib-4.5.5.tar.gz -o hamlib.tar.gz
           tar xzf hamlib.tar.gz
           cd hamlib-4.5.5
+          # Patch microham.c to include winsock2.h before any other headers
+          # (otherwise mingw64 doesn't expose fd_set/FD_SET/select).
+          if [ -f src/microham.c ]; then
+            sed -i '1i #include <winsock2.h>' src/microham.c
+          fi
           ./configure --prefix=$(cygpath -m $(pwd))/../hamlib-prefix \
                       --enable-shared --disable-static \
                       --without-cxx-binding \
                       --disable-winradio \
-                      --disable-microham \
                       --disable-dependency-tracking \
+                      CFLAGS="-DWIN32_LEAN_AND_MEAN" \
                       LIBS="-lws2_32"
           make -j$(nproc)
           make install
