@@ -20,6 +20,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QMenu>
+#include <QTableWidget>
+#include <QHeaderView>
 #include <QDir>
 #include <QDebug>
 #include <QtConcurrent/QtConcurrentRun>
@@ -738,6 +741,11 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   connect(txMsgButtonGroup,SIGNAL(buttonClicked(int)),SLOT(set_ntx(int)));
   connect(ui->decodedTextBrowser2,SIGNAL(selectCallsign(bool,bool)),this,SLOT(doubleClickOnCall(bool,bool)));
   connect(ui->decodedTextBrowser,SIGNAL(selectCallsign(bool,bool)),this,SLOT(doubleClickOnCall2(bool,bool)));
+  // Candidate panel: double-click promote, right-click context menu.
+  connect(ui->candidateTable, &QTableWidget::cellDoubleClicked,
+          this, [this](int r, int) { on_candidateTable_doubleClicked(r); });
+  connect(ui->candidateTable, &QTableWidget::customContextMenuRequested,
+          this, &MainWindow::on_candidateTable_customContextMenu);
   connect(ui->decodedTextBrowser->horizontalScrollBar(),SIGNAL(sliderMoved(int)),SLOT(ScrollBarPosition(int)));
 
   // initialise decoded text font and hook up change signal
@@ -3852,6 +3860,215 @@ void MainWindow::passive_load_cooldowns()
   }
 }
 
+// ---------------------------------------------------------------------------
+// Candidate-ranking panel (under Band Activity).
+// Accumulates stations we've considered or heard CQing, decays them after
+// 5 min of silence, sorted by score descending.
+// ---------------------------------------------------------------------------
+
+void MainWindow::note_passive_candidate(QString const& call, int prio, int score,
+                                        QString const& continent, QString const& country)
+{
+  QString base = Radio::base_callsign(call);
+  if (base.length() < 3) return;
+  PassiveCandidate &c = m_passiveCandidates[base];
+  if (c.call.isEmpty()) c.call = base;
+  c.prio = prio;
+  c.score = score;
+  if (!continent.isEmpty()) c.continent = continent;
+  if (!country.isEmpty()) c.country = country;
+  // Pull live data from StationTracker for snr / grid / last_heard.
+  StationTracker::Behavior const& b = m_stationTracker.get(base);
+  c.snr_best = b.best_snr;
+  c.snr_avg = b.avg_snr();
+  c.last_heard_ms = b.last_heard_ms;
+  if (!b.grid.isEmpty()) c.grid = b.grid;
+  c.busy_with_other = !b.currently_in_qso_with.isEmpty()
+                      && b.currently_in_qso_with != Radio::base_callsign(m_baseCall);
+  c.busy_partner = c.busy_with_other ? b.currently_in_qso_with : QString();
+  c.cooldown_until_ms = m_passiveCooldown.value(base, 0);
+  c.currently_calling = (Radio::base_callsign(m_hisCall) == base);
+}
+
+void MainWindow::update_candidate_panel()
+{
+  if (!ui->candidateTable) return;
+  qint64 now = m_jtdxtime ? m_jtdxtime->currentMSecsSinceEpoch2()
+                          : QDateTime::currentMSecsSinceEpoch();
+  // Decay: remove any candidate not heard from in last 5 min.
+  qint64 decay_cutoff = now - 5 * 60 * 1000;
+  // Also pull anyone in StationTracker who has CQ'd recently and isn't already in.
+  // (Lets us populate even before process_Auto scores them.)
+  // We'd need an accessor; for now just use whatever's already in the map.
+  QStringList expired;
+  for (auto it = m_passiveCandidates.constBegin(); it != m_passiveCandidates.constEnd(); ++it) {
+    qint64 lh = it.value().last_heard_ms;
+    if (lh > 0 && lh < decay_cutoff && !it.value().manual_pin) expired << it.key();
+  }
+  for (QString const& k : expired) m_passiveCandidates.remove(k);
+
+  // Build sorted list. Currently-calling first, then manual pins, then by score desc.
+  QList<PassiveCandidate> rows = m_passiveCandidates.values();
+  std::sort(rows.begin(), rows.end(), [](PassiveCandidate const& a, PassiveCandidate const& b) {
+    if (a.currently_calling != b.currently_calling) return a.currently_calling;
+    if (a.manual_pin != b.manual_pin) return a.manual_pin;
+    return a.score > b.score;
+  });
+
+  ui->candidateTable->setUpdatesEnabled(false);
+  // Set up columns once.
+  if (ui->candidateTable->columnCount() != 8) {
+    ui->candidateTable->setColumnCount(8);
+    ui->candidateTable->setHorizontalHeaderLabels(QStringList()
+        << "#" << "Call" << "Country" << "Grid" << "SNR" << "Last" << "Score" << "Status");
+    auto * hdr = ui->candidateTable->horizontalHeader();
+    if (hdr) {
+      hdr->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+      hdr->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+      hdr->setSectionResizeMode(2, QHeaderView::Stretch);
+      hdr->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+      hdr->setSectionResizeMode(4, QHeaderView::ResizeToContents);
+      hdr->setSectionResizeMode(5, QHeaderView::ResizeToContents);
+      hdr->setSectionResizeMode(6, QHeaderView::ResizeToContents);
+      hdr->setSectionResizeMode(7, QHeaderView::Stretch);
+    }
+    ui->candidateTable->verticalHeader()->setVisible(false);
+    ui->candidateTable->verticalHeader()->setDefaultSectionSize(18);
+  }
+
+  ui->candidateTable->setRowCount(rows.size());
+  for (int r = 0; r < rows.size(); r++) {
+    PassiveCandidate const& c = rows[r];
+    int secsAgo = (c.last_heard_ms > 0) ? int((now - c.last_heard_ms) / 1000) : -1;
+    QString lastStr = (secsAgo < 0) ? QString("?")
+                      : (secsAgo < 60) ? QString("%1s").arg(secsAgo)
+                      : QString("%1m").arg(secsAgo / 60);
+    QString snrStr = (c.snr_best > -90) ? QString("%1/%2").arg(c.snr_best).arg(c.snr_avg) : QString("?");
+    QString status;
+    if (c.currently_calling) status = tr("CALLING");
+    else if (c.cooldown_until_ms > now) {
+      int secs = int((c.cooldown_until_ms - now) / 1000);
+      status = tr("CD %1:%2").arg(secs / 60).arg(secs % 60, 2, 10, QChar('0'));
+    }
+    else if (c.busy_with_other) status = c.busy_partner.isEmpty() ? tr("busy") : tr("→ %1").arg(c.busy_partner);
+    else if (c.manual_pin) status = tr("pinned");
+    else status = tr("ready");
+
+    auto setCell = [&](int col, QString const& text, Qt::Alignment align = Qt::AlignLeft | Qt::AlignVCenter) {
+      QTableWidgetItem * it = new QTableWidgetItem(text);
+      it->setTextAlignment(int(align));
+      ui->candidateTable->setItem(r, col, it);
+    };
+    setCell(0, QString::number(r + 1), Qt::AlignCenter);
+    setCell(1, c.call);
+    setCell(2, c.country.isEmpty() ? "" : c.country);
+    setCell(3, c.grid);
+    setCell(4, snrStr, Qt::AlignCenter);
+    setCell(5, lastStr, Qt::AlignCenter);
+    setCell(6, QString::number(c.score), Qt::AlignCenter);
+    setCell(7, status);
+
+    // Color coding: highlight currently-calling green; cooldown grey;
+    // worked-priority bonus pink for new DXCC etc. Same palette as
+    // band activity uses for priority colors.
+    QColor bg;
+    if (c.currently_calling) bg = QColor("#a8e6a3");           // green
+    else if (c.cooldown_until_ms > now) bg = QColor("#dcdcdc"); // grey
+    else if (c.busy_with_other) bg = QColor("#e0d0a0");         // tan
+    else if (c.prio > 19) bg = QColor("#ffb3b3");               // new DXCC-ish — pink
+    else if (c.prio >= 13) bg = QColor("#fff2a8");              // new grid-ish — yellow
+    else if (c.prio >= 5) bg = QColor("#d6f5d6");               // new call-ish — light green
+    else bg = QColor();
+    if (bg.isValid()) {
+      for (int col = 0; col < 8; col++) {
+        auto * it = ui->candidateTable->item(r, col);
+        if (it) it->setBackground(bg);
+      }
+    }
+  }
+  ui->candidateTable->setUpdatesEnabled(true);
+}
+
+void MainWindow::on_candidateTable_doubleClicked(int row)
+{
+  if (row < 0) return;
+  auto * item = ui->candidateTable->item(row, 1);  // call column
+  if (!item) return;
+  QString call = item->text();
+  if (call.isEmpty()) return;
+  // Manual-pin: mark this candidate as pinned and set as DX call.
+  QString base = Radio::base_callsign(call);
+  if (m_passiveCandidates.contains(base)) {
+    // Clear other pins
+    for (auto it = m_passiveCandidates.begin(); it != m_passiveCandidates.end(); ++it)
+      it.value().manual_pin = false;
+    m_passiveCandidates[base].manual_pin = true;
+  }
+  // Take the station off cooldown if it was — user explicitly asked to call.
+  m_passiveCooldown.remove(base);
+  m_passiveCooldownStrikes.remove(base);
+  passive_save_cooldowns();
+  // Set as DX call, let process_Auto pick up next cycle.
+  ui->dxCallEntry->setText(call);
+  m_processAuto_done = false;
+  writeToALLTXT(QString("Manual pin: %1 set as DX call from candidate panel").arg(call));
+  update_autoseq_status(tr("Manually selected %1").arg(call));
+  update_candidate_panel();
+}
+
+void MainWindow::on_candidateTable_customContextMenu(const QPoint & pos)
+{
+  int row = ui->candidateTable->rowAt(pos.y());
+  if (row < 0) return;
+  auto * item = ui->candidateTable->item(row, 1);
+  if (!item) return;
+  QString call = item->text();
+  if (call.isEmpty()) return;
+  QString base = Radio::base_callsign(call);
+
+  QMenu menu;
+  menu.addAction(tr("Call %1 now").arg(call), this, [=]() {
+    on_candidateTable_doubleClicked(row);
+  });
+  menu.addSeparator();
+  QMenu * ignoreMenu = menu.addMenu(tr("Ignore %1 for...").arg(call));
+  struct Opt { QString label; int minutes; };
+  QList<Opt> opts = {
+    {tr("5 minutes"), 5}, {tr("10 minutes"), 10}, {tr("30 minutes"), 30},
+    {tr("1 hour"), 60}, {tr("4 hours"), 240}, {tr("1 day"), 24*60},
+    {tr("Rest of session"), 9999}
+  };
+  for (auto const& o : opts) {
+    int mins = o.minutes;
+    ignoreMenu->addAction(o.label, this, [=]() {
+      qint64 now = m_jtdxtime->currentMSecsSinceEpoch2();
+      m_passiveCooldown.insert(base, now + qint64(mins) * 60000);
+      m_passiveCooldownStrikes.insert(base, 0);  // manual ignore doesn't escalate
+      passive_save_cooldowns();
+      writeToALLTXT(QString("User ignore: %1 for %2 min").arg(call).arg(mins));
+      update_autoseq_status(tr("Ignoring %1 for %2 min").arg(call).arg(mins));
+      // Clear current DX if it's this call.
+      if (Radio::base_callsign(m_hisCall) == base) {
+        clearDX(QString(" cleared, user ignore from candidate panel"));
+      }
+      update_candidate_panel();
+    });
+  }
+  menu.addSeparator();
+  menu.addAction(tr("Lift cooldown"), this, [=]() {
+    m_passiveCooldown.remove(base);
+    m_passiveCooldownStrikes.remove(base);
+    passive_save_cooldowns();
+    writeToALLTXT(QString("Cooldown manually lifted: %1").arg(call));
+    update_candidate_panel();
+  });
+  menu.addAction(tr("Remove from list"), this, [=]() {
+    m_passiveCandidates.remove(base);
+    update_candidate_panel();
+  });
+  menu.exec(ui->candidateTable->viewport()->mapToGlobal(pos));
+}
+
 void MainWindow::refresh_wavelog_credentials()
 {
   if (!m_wavelog) return;
@@ -4148,6 +4365,8 @@ void MainWindow::process_Auto()
         }
         // Score and keep the best
         int sc = passive_score_candidate(try_call, try_prio, 0, continent);
+        // Record for the candidate panel (visualize the ranking).
+        note_passive_candidate(try_call, try_prio, sc, continent, cn);
         if (sc > best_score) {
           best_score = sc;
           best_call = try_call;
@@ -4275,6 +4494,7 @@ void MainWindow::process_Auto()
     }
   }
 //  printf("%s(%0.1f) process_Auto: %s,%s,%s,%s,%d,%d,%d,%d,%d,%d,%d,%d,%d\n",m_jtdxtime->currentDateTimeUtc2().toString("hh:mm:ss.zzz").toStdString().c_str(),m_jtdxtime->GetOffset(),m_hisCall.toStdString().c_str(),hisCall.toStdString().c_str(),m_lastloggedcall.toStdString().c_str(),mode.toStdString().c_str(),m_status,prio,ui->TxFreqSpinBox->value (),m_used_freq,m_callMode,m_callPrioCQ,m_reply_other,m_reply_me,counters2);
+  if (m_passiveMode) update_candidate_panel();
 
   if (rx > 0 && rx != ui->RxFreqSpinBox->value ()) ui->RxFreqSpinBox->setValue (rx);
   //if (tx > 0 && tx != ui->TxFreqSpinBox->value ()) ui->TxFreqSpinBox->setValue (tx);
@@ -4596,6 +4816,18 @@ void MainWindow::readFromStdout()                             //readFromStdout
                                      m_baseCall,
                                      isCq, decodedtext.snr(),
                                      grid, m_jtdxtime->currentMSecsSinceEpoch2());
+        // Add CQ stations to the candidate panel even before process_Auto
+        // scores them — gives the user immediate visibility into who's on
+        // the band. The score will be updated next decode cycle.
+        if (isCq && m_passiveMode) {
+          QString cn;
+          m_logBook.getDXCC(deCall, cn);
+          QString cont = cn.split(',').value(0).trimmed();
+          if (!cont.isEmpty()) m_stationTracker.set_continent(deCall, cont);
+          // Use existing entry's score if already there (process_Auto sets it).
+          int existingScore = m_passiveCandidates.value(Radio::base_callsign(deCall)).score;
+          note_passive_candidate(deCall, 0, existingScore, cont, cn);
+        }
         if (!grid.isEmpty()) m_stationTracker.set_distance(deCall, /* distance unknown here */ 0);
         // Edge case #15: a station that's CQing while on our cooldown list
         // is back on the air and active. Remove them so they're eligible.
@@ -5377,6 +5609,8 @@ void MainWindow::guiUpdate()
 
 //Once per second:
   if(nsec != m_sec0) {
+    // Refresh candidate panel cooldown countdowns / decay every second.
+    if (m_passiveMode) update_candidate_panel();
     // Sync PSK self-monitor enable state and target to current config / band / call.
     if (m_pskSelfMonitor) {
       bool want = m_config.psk_self_monitor() && !m_baseCall.isEmpty();

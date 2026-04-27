@@ -86,6 +86,28 @@ public:
                       QProcessEnvironment const&, QWidget *parent = 0);
   ~MainWindow();
 
+public:
+  // Candidate-ranking panel. Accumulates stations we've considered for
+  // calling, decays after 5 min if not heard from again. UI: QTableWidget
+  // populated each decode cycle, ordered by score desc.
+  struct PassiveCandidate {
+    QString call;
+    QString country;        // from logbook getDXCC
+    QString continent;      // 2-letter
+    QString grid;
+    int snr_best = -99;
+    int snr_avg = -99;
+    qint64 last_heard_ms = 0;
+    int score = 0;
+    int prio = 0;
+    bool currently_calling = false;
+    bool busy_with_other = false;
+    QString busy_partner;
+    qint64 cooldown_until_ms = 0;  // 0 if not on cooldown
+    bool manual_pin = false;       // double-clicked: stay at top
+    int color_priority = 0;        // for color-coding (mirrors displaytext priority)
+  };
+
 public slots:
   void showSoundInError(const QString& errorMsg);
   void showSoundOutError(const QString& errorMsg);
@@ -106,6 +128,11 @@ public slots:
   void passive_save_cooldowns();
   bool passive_should_skip_for_region(QString const& call, int prio, QString const& continent, QString * reason = nullptr);
   void refresh_wavelog_credentials();
+  void update_candidate_panel();
+  void note_passive_candidate(QString const& call, int prio, int score,
+                              QString const& continent, QString const& country);
+  void on_candidateTable_doubleClicked(int row);
+  void on_candidateTable_customContextMenu(const QPoint & pos);
   void p1ReadFromStdout();
   void setXIT(int n, Frequency base = 0u);
   void setFreq4(int rxFreq, int txFreq);
@@ -584,6 +611,7 @@ private:
   bool m_passiveMode;
   QHash<QString, qint64> m_passiveCooldown;  // callsign -> cooldown expiry timestamp (ms)
   QHash<QString, int> m_passiveCooldownStrikes;  // callsign -> consecutive cooldowns (exponential backoff)
+  QHash<QString, PassiveCandidate> m_passiveCandidates;
   StationTracker m_stationTracker;
   // Per-decode-cycle "skip these" set, populated as we reject candidates;
   // gets reset at the start of each call to passive_select_candidate().
