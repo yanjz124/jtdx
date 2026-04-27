@@ -140,6 +140,7 @@ public:
   bool tx_QSY_allowed () const;
   bool spot_to_psk_reporter () const;
   bool spot_to_dxsummit () const;
+  bool psk_self_monitor () const;
   bool prevent_spotting_false () const;
   bool filterUDP () const;
   bool send_to_eqsl () const;

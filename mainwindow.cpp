@@ -54,6 +54,7 @@
 #include "wsprnet.h"
 #include "eqsl.h"
 #include "WavelogUploader.h"
+#include "PSKSelfMonitor.h"
 #include "signalmeter.h"
 #include "HelpTextWindow.hpp"
 #include "SampleDownloader.hpp"
@@ -361,6 +362,8 @@ MainWindow::MainWindow(bool multiple, QSettings * settings, QSharedMemory *shdme
   wsprNet {new WSPRNet {network_manager, this}},
   Eqsl {new EQSL {network_manager, this}},
   m_wavelog {new WavelogUploader {this}},
+  m_pskSelfMonitor {new PSKSelfMonitor {network_manager, this}},
+  m_pskSelfLabel {nullptr},
   m_hisCall {""},
   m_hisGrid {""},
   m_wantedCall {""}, m_wantedCountry {""}, m_wantedPrefix {""}, m_wantedGrid {""},
@@ -2271,9 +2274,10 @@ void MainWindow::on_enableTxButton_clicked (bool checked)
 }
 
 void MainWindow::enableTx_mode (bool state) {
-  if (m_passiveMode && !state && m_config.write_decoded_debug()) {
-    writeToALLTXT("Passive mode: Enable TX being set to OFF (programmatic)");
-  }
+  // Log every programmatic enable/disable unconditionally so we can debug
+  // unwanted-TX scenarios without needing the global debug checkbox on.
+  writeToALLTXT(QString("enableTx_mode(%1) called, passiveMode=%2 enableTx=%3 passiveUserDisabled=%4 transmitting=%5")
+                .arg(state).arg(m_passiveMode).arg(m_enableTx).arg(m_passiveTxUserDisabled).arg(m_transmitting));
   m_programmaticEnableTx = true;
   ui->enableTxButton->setChecked (state); on_enableTxButton_clicked (state);
   m_programmaticEnableTx = false;
@@ -2719,6 +2723,18 @@ void MainWindow::createStatusBar()                           //createStatusBar
   lastlogged_label->setFrameStyle(QFrame::Panel | QFrame::Sunken);
   statusBar()->addWidget(lastlogged_label);
 
+  m_pskSelfLabel = new QLabel {tr("PSK: --")};
+  m_pskSelfLabel->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+  m_pskSelfLabel->setContentsMargins(3,1,3,1);
+  m_pskSelfLabel->setMinimumSize(QSize(180,20));
+  m_pskSelfLabel->setFrameStyle(QFrame::Panel | QFrame::Sunken);
+  m_pskSelfLabel->setToolTip(tr("PSK Reporter self-monitor: who heard your last 30 min of TX."));
+  statusBar()->addWidget(m_pskSelfLabel);
+  connect(m_pskSelfMonitor, &PSKSelfMonitor::poll_result,
+          this, &MainWindow::handlePSKSelfPollResult);
+  connect(m_pskSelfMonitor, &PSKSelfMonitor::no_spots_alert,
+          this, &MainWindow::handlePSKSelfAlert);
+
   date_label->setAlignment(Qt::AlignHCenter);
   date_label->setAlignment(Qt::AlignVCenter);
   date_label->setContentsMargins(1,1,1,1);
@@ -3118,12 +3134,10 @@ void MainWindow::on_actionPassiveMode_toggled(bool checked)
     txwatchdog(false);
   }
   if (!checked) {
-    // Turning off passive mode: clear cooldowns and ensure TX is usable
+    // Turning off passive mode: clear cooldowns. Don't force-enable TX —
+    // that would override the user's TX-off choice and cause unwanted
+    // transmissions. The button works for manual enable.
     m_passiveCooldown.clear();
-    if (!m_enableTx && !m_tune) {
-      enableTx_mode(true);
-      txwatchdog(false);
-    }
   }
 }
 
@@ -3144,6 +3158,83 @@ void MainWindow::on_skipCallButton_clicked()
     // Reset counter so CQ search runs immediately on next cycle
     m_counter = 0;
   }
+}
+
+void MainWindow::handlePSKSelfPollResult()
+{
+  if (!m_pskSelfLabel) return;
+  auto const& s = m_pskSelfMonitor->last_stats();
+  if (!s.valid) {
+    m_pskSelfLabel->setText(tr("PSK: query failed"));
+    m_pskSelfLabel->setToolTip(s.error.isEmpty()
+        ? tr("PSK Reporter query failed (no detail).")
+        : tr("PSK Reporter query failed: %1").arg(s.error));
+    m_pskSelfLabel->setStyleSheet(QString("QLabel{background: %1; color: black}")
+                                  .arg(Radio::convert_dark("#cccccc", m_useDarkStyle)));
+    if(m_config.write_decoded_debug())
+      writeToALLTXT("PSKSelfMonitor query failed: " + s.error);
+    return;
+  }
+  m_pskSelfLabel->setToolTip(tr("PSK Reporter self-monitor: who heard your last %1 min of TX.")
+                             .arg(s.window_minutes));
+  QString text;
+  QString bg;
+  int pct = (s.tx_count > 0) ? (100 * s.tx_heard_count / s.tx_count) : -1;
+  if (s.spot_count == 0) {
+    if (pct >= 0)
+      text = tr("PSK: 0/%1 TX heard in %2m").arg(s.tx_count).arg(s.window_minutes);
+    else
+      text = tr("PSK: 0 in %1m").arg(s.window_minutes);
+    bg = "#ff9999";
+  } else {
+    int mins_ago = -1;
+    if (s.latest_spot_epoch > 0) {
+      qint64 now_s = QDateTime::currentSecsSinceEpoch();
+      mins_ago = int((now_s - s.latest_spot_epoch) / 60);
+      if (mins_ago < 0) mins_ago = 0;
+    }
+    // Phase 3: continent breakdown via logbook DXCC lookup.
+    QHash<QString, int> by_continent;
+    for (QString const& rxc : s.receivers) {
+      QString cn;
+      m_logBook.getDXCC(rxc, cn);
+      if (cn.isEmpty()) continue;
+      QString continent = cn.split(',').value(0).trimmed();
+      if (continent.isEmpty() || continent == "??") continue;
+      by_continent[continent] = by_continent.value(continent, 0) + 1;
+    }
+    // Phase 4: feed the continent counts back to the monitor so process_Auto
+    // can use them as a tie-breaker when picking which CQ to answer.
+    if (m_pskSelfMonitor) m_pskSelfMonitor->set_heard_continents(by_continent);
+    QStringList parts;
+    for (auto it = by_continent.constBegin(); it != by_continent.constEnd(); ++it)
+      parts << QString("%1×%2").arg(it.key()).arg(it.value());
+    std::sort(parts.begin(), parts.end());
+    QString continents = parts.isEmpty() ? "" : (" [" + parts.join(" ") + "]");
+    if (pct >= 0)
+      text = tr("PSK: %1/%2 TX (%3%%) %4 RX %5 DXCC last %6m best %7 dB%8")
+              .arg(s.tx_heard_count).arg(s.tx_count).arg(pct)
+              .arg(s.unique_callsigns).arg(s.unique_dxcc)
+              .arg(mins_ago).arg(s.best_snr).arg(continents);
+    else
+      text = tr("PSK: %1 RX %2 DXCC last %3m best %4 dB%5")
+              .arg(s.unique_callsigns).arg(s.unique_dxcc)
+              .arg(mins_ago).arg(s.best_snr).arg(continents);
+    if (mins_ago >= 0 && mins_ago <= 5) bg = "#a8e6a3";
+    else if (mins_ago > 0 && mins_ago <= 30) bg = "#ffe699";
+    else bg = "#ff9999";
+  }
+  m_pskSelfLabel->setText(text);
+  m_pskSelfLabel->setStyleSheet(QString("QLabel{background: %1; color: black}")
+                                .arg(Radio::convert_dark(bg, m_useDarkStyle)));
+}
+
+void MainWindow::handlePSKSelfAlert(QString const& message)
+{
+  update_autoseq_status(message);
+  if(m_config.write_decoded_debug())
+    writeToALLTXT("PSKSelfAlert: " + message);
+  QApplication::beep();
 }
 
 void MainWindow::on_atuButton_clicked()
@@ -3773,6 +3864,24 @@ void MainWindow::process_Auto()
         writeToALLTXT("Passive mode: skipping " + hisCall + " (on cooldown), staying in monitor");
       hisCall = "";
       m_status = QsoHistory::NONE;
+    }
+    // Phase 4: in passive mode, if the picked CQ is from a continent that
+    // PSK Reporter says hasn't heard us recently, AND it's a low-priority
+    // pick (worked-before with no "new" bonus), skip it. We want our cycles
+    // spent on stations that can actually hear us. Sample-size guarded
+    // inside continent_known_to_hear() — needs ≥10 spots before activating.
+    if (m_passiveMode && !hisCall.isEmpty() && prio <= 4 && m_pskSelfMonitor) {
+      QString cn;
+      m_logBook.getDXCC(hisCall, cn);
+      QString continent = cn.split(',').value(0).trimmed();
+      if (!continent.isEmpty()
+          && m_pskSelfMonitor->last_stats().spot_count >= 10
+          && !m_pskSelfMonitor->continent_known_to_hear(continent)) {
+        writeToALLTXT(QString("Phase 4: skipping %1 (continent %2 not in heard list, prio=%3)")
+                      .arg(hisCall).arg(continent).arg(prio));
+        hisCall = "";
+        m_status = QsoHistory::NONE;
+      }
     }
     if(m_config.write_decoded_debug()) {
       QString StrDirection = "";
@@ -4883,6 +4992,10 @@ void MainWindow::guiUpdate()
       } 
 
     m_transmitting = true;
+    if (m_pskSelfMonitor) {
+      m_pskSelfMonitor->note_tx();
+      m_pskSelfMonitor->set_target(m_baseCall, m_freqNominal);
+    }
     if (!m_config.tx_QSY_allowed ()) ui->TxFreqSpinBox->setDisabled(true);
     m_transmittedQSOProgress = m_QSOProgress;
     transmitDisplay (true);
@@ -4902,6 +5015,19 @@ void MainWindow::guiUpdate()
 
 //Once per second:
   if(nsec != m_sec0) {
+    // Sync PSK self-monitor enable state and target to current config / band / call.
+    if (m_pskSelfMonitor) {
+      bool want = m_config.psk_self_monitor() && !m_baseCall.isEmpty();
+      if (want != m_pskSelfMonitor->is_enabled()) {
+        m_pskSelfMonitor->set_enabled(want);
+        if (want && m_pskSelfLabel) m_pskSelfLabel->setText(tr("PSK: polling..."));
+        else if (m_pskSelfLabel) {
+          m_pskSelfLabel->setText(tr("PSK: --"));
+          m_pskSelfLabel->setStyleSheet(QString());
+        }
+      }
+      if (want) m_pskSelfMonitor->set_target(m_baseCall, m_freqNominal);
+    }
     if (m_config.watchdog() && !m_transmitting && !m_mode.startsWith ("WSPR")
         && m_idleMinutes >= m_config.watchdog () && !m_passiveMode) {
       txwatchdog (true);       // switch off Enable Tx button
