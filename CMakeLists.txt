@@ -1421,6 +1421,18 @@ if (NOT is_debug_build)
     # if a system Qt is used (e.g. installed in /usr/lib/), it will not be included in the installation
     set (fixup_exe "\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}/${CMAKE_PROJECT_NAME}${CMAKE_EXECUTABLE_SUFFIX}")
 
+    # OpenSSL DLLs are loaded by Qt at runtime (not link-time), so fixup_bundle
+    # doesn't pick them up. Without these, Qt's QNetworkAccessManager fails any
+    # HTTPS request with "TLS initialization failed". Bundle them explicitly.
+    if (WIN32)
+      foreach (ssl_dll libssl-3-x64.dll libcrypto-3-x64.dll)
+        if (EXISTS "${CMAKE_PREFIX_PATH}/bin/${ssl_dll}")
+          install (FILES "${CMAKE_PREFIX_PATH}/bin/${ssl_dll}"
+            DESTINATION ${CMAKE_INSTALL_BINDIR})
+        endif ()
+      endforeach ()
+    endif ()
+
     #get_filename_component (hamlib_lib_dir ${hamlib_LIBRARIES} PATH)
 
     if (APPLE)

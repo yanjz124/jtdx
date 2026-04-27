@@ -3149,10 +3149,17 @@ void MainWindow::handlePSKSelfPollResult()
   auto const& s = m_pskSelfMonitor->last_stats();
   if (!s.valid) {
     m_pskSelfLabel->setText(tr("PSK: query failed"));
+    m_pskSelfLabel->setToolTip(s.error.isEmpty()
+        ? tr("PSK Reporter query failed (no detail).")
+        : tr("PSK Reporter query failed: %1").arg(s.error));
     m_pskSelfLabel->setStyleSheet(QString("QLabel{background: %1; color: black}")
                                   .arg(Radio::convert_dark("#cccccc", m_useDarkStyle)));
+    if(m_config.write_decoded_debug())
+      writeToALLTXT("PSKSelfMonitor query failed: " + s.error);
     return;
   }
+  m_pskSelfLabel->setToolTip(tr("PSK Reporter self-monitor: who heard your last %1 min of TX.")
+                             .arg(s.window_minutes));
   QString text;
   QString bg;
   int pct = (s.tx_count > 0) ? (100 * s.tx_heard_count / s.tx_count) : -1;

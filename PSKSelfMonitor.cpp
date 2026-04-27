@@ -15,7 +15,8 @@
 
 namespace
 {
-  // pskreporter.info query API.
+  // pskreporter.info query API. HTTPS is required by Cloudflare;
+  // OpenSSL DLLs ship with the JTDX bundle.
   char const * const PSKReporterQueryUrl = "https://retrieve.pskreporter.info/query";
   // Poll every 5 minutes — pskreporter.info asks for 5+ minute interval.
   int const PollIntervalMs = 5 * 60 * 1000;
@@ -123,6 +124,12 @@ void PSKSelfMonitor::poll_now ()
   if (reply_) return;  // a previous request is still outstanding
   QNetworkRequest req {QUrl {build_query_url ()}};
   req.setHeader (QNetworkRequest::UserAgentHeader, "JTDX-PSKSelfMonitor/1.0");
+  // Cloudflare 301-redirects HTTP→HTTPS; tell Qt to follow.
+#if QT_VERSION >= QT_VERSION_CHECK(5, 9, 0)
+  req.setAttribute (QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
+#else
+  req.setAttribute (QNetworkRequest::FollowRedirectsAttribute, true);
+#endif
   reply_ = nam_->get (req);
   connect (reply_, &QNetworkReply::finished, this, &PSKSelfMonitor::on_reply);
 }
@@ -187,18 +194,32 @@ void PSKSelfMonitor::on_reply ()
 
   if (r->error () != QNetworkReply::NoError) {
     QString err = r->errorString ();
-    qWarning () << "PSKSelfMonitor: query failed:" << err;
+    int httpCode = r->attribute (QNetworkRequest::HttpStatusCodeAttribute).toInt ();
+    qWarning () << "PSKSelfMonitor: query failed:" << err << " HTTP=" << httpCode
+                << " URL=" << r->url ().toString ();
     r->deleteLater ();
-    // Mark stats invalid and notify UI so the label doesn't get stuck.
     Stats s;
     s.valid = false;
     s.window_minutes = window_minutes_;
+    s.error = err + (httpCode > 0 ? QString (" (HTTP %1)").arg (httpCode) : QString ());
     last_ = s;
     emit poll_result (last_);
     return;
   }
   QByteArray body = r->readAll ();
+  int httpCode = r->attribute (QNetworkRequest::HttpStatusCodeAttribute).toInt ();
   r->deleteLater ();
+  if (body.isEmpty () || !body.contains ("<receptionReports")) {
+    qWarning () << "PSKSelfMonitor: unexpected response, HTTP=" << httpCode
+                << " body[0..200]=" << body.left (200);
+    Stats s;
+    s.valid = false;
+    s.window_minutes = window_minutes_;
+    s.error = QString ("Unexpected response (HTTP %1): %2").arg (httpCode).arg (QString::fromUtf8 (body.left (120)));
+    last_ = s;
+    emit poll_result (last_);
+    return;
+  }
 
   last_ = parse_reply (body);
   emit poll_result (last_);
