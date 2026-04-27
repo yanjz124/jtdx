@@ -1253,6 +1253,11 @@ void MainWindow::writeSettings()
   m_settings->setValue("CallHigherNewCall",ui->actionCallHigherNewCall->isChecked());
   m_settings->setValue("SingleShotQSO",ui->actionSingleShot->isChecked());
   m_settings->setValue("PassiveMode",ui->actionPassiveMode->isChecked());
+  // Persist user's "TX off" intent across restarts so passive-mode auto-re-enable
+  // doesn't override it. Also persist whether TX was actually enabled at exit so
+  // a fresh JTDX start respects the last-known state instead of auto-keying.
+  m_settings->setValue("PassiveTxUserDisabled", m_passiveTxUserDisabled);
+  m_settings->setValue("EnableTxAtExit", m_enableTx);
   m_settings->setValue("AutoFilter",ui->actionAutoFilter->isChecked());
   m_settings->setValue("EnableHoundMode",ui->actionEnable_hound_mode->isChecked());  
   m_settings->setValue("ShowHarmonics",ui->actionShow_messages_decoded_from_harmonics->isChecked());
@@ -1316,6 +1321,7 @@ void MainWindow::writeSettings()
 //---------------------------------------------------------- readSettings()
 void MainWindow::readSettings()
 {
+  m_settingsRestoring = true;
   m_settings->beginGroup("MainWindow");
   
   m_geometry = m_settings->value ("geometry",saveGeometry()).toByteArray();
@@ -1457,6 +1463,11 @@ void MainWindow::readSettings()
   ui->actionCallHigherNewCall->setChecked(m_settings->value("CallHigherNewCall",false).toBool());
   ui->actionSingleShot->setChecked(m_settings->value("SingleShotQSO",false).toBool());
   ui->actionPassiveMode->setChecked(m_settings->value("PassiveMode",false).toBool());
+  // Restore user-disabled flag and exit TX state. If user explicitly turned off
+  // TX before quitting, keep it off on restart (and prevent passive-mode auto
+  // re-enable from overriding their intent).
+  m_passiveTxUserDisabled = m_settings->value("PassiveTxUserDisabled", false).toBool();
+  m_enableTxAtStartup = m_settings->value("EnableTxAtExit", false).toBool();
   ui->actionAutoFilter->setChecked(m_settings->value("AutoFilter",false).toBool());
   ui->actionEnable_hound_mode->setChecked(m_settings->value("EnableHoundMode",false).toBool());
 
@@ -1630,6 +1641,7 @@ void MainWindow::readSettings()
   dec_data.params.nstophint=1;
   m_nlasttx=0;
   m_delay=0;
+  m_settingsRestoring = false;
 }
 
 void MainWindow::setDecodedTextFont (QFont const& font)
@@ -2258,6 +2270,7 @@ void MainWindow::on_enableTxButton_clicked (bool checked)
 {
   if(m_enableTx && !checked && m_curMsgTx.startsWith(m_hisCall+" ")) m_lasthint=true;
   if(checked && m_lasthint) m_lasthint=false;
+  bool wasOn = m_enableTx;
   m_enableTx = checked;
   // Track user intent for passive mode - only real user clicks set this flag
   if (m_passiveMode && !m_programmaticEnableTx) {
@@ -2270,13 +2283,41 @@ void MainWindow::on_enableTxButton_clicked (bool checked)
     else { palette.setColor(QPalette::Base,Qt::yellow); }
     ui->sbTxPercent->setPalette(palette);
   }
-  if(m_enableTx) {
-	 ui->enableTxButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-radius: 5px;border-color: %3;min-width: 63px;padding: 0px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#ff3c3c",m_useDarkStyle),Radio::convert_dark("#000000",m_useDarkStyle)));
-  } else {
-// sync TX variables 
-     if(!m_transmitting) { m_bTxTime=false; m_tx_when_ready=false; m_restart=false; m_txNext=false; }
-	 ui->enableTxButton->setStyleSheet(QString("QPushButton {color: %1;background: %2;border-style: solid;border-width: 1px;border-color: %3;min-width: 63px;padding: 0px}").arg(Radio::convert_dark("#000000",m_useDarkStyle),Radio::convert_dark("#dcdcdc",m_useDarkStyle),Radio::convert_dark("#adadad",m_useDarkStyle)));
+  // If the user manually turned TX off mid-cycle, halt the current TX so the
+  // rig stops keying immediately — otherwise the current period continues
+  // running and the button looks grey while the radio is still transmitting.
+  if (wasOn && !m_enableTx && !m_programmaticEnableTx
+      && (m_transmitting || g_iptt == 1)) {
+    haltTx("Enable TX clicked off mid-cycle");
   }
+  if(!m_enableTx) {
+    // sync TX variables
+    if(!m_transmitting) { m_bTxTime=false; m_tx_when_ready=false; m_restart=false; m_txNext=false; }
+  }
+  styleEnableTxButton();
+}
+
+void MainWindow::styleEnableTxButton ()
+{
+  // Three visual states reflecting actual rig state, not just intent:
+  //   RED    — currently transmitting (rig is keyed up RIGHT NOW)
+  //   AMBER  — Enable TX is on, waiting for next slot
+  //   GREY   — TX off
+  QString bg, border;
+  if (m_transmitting || g_iptt == 1) {
+    bg = "#ff3c3c"; border = "#000000";  // active TX
+  } else if (m_enableTx) {
+    bg = "#ffc266"; border = "#000000";  // ready, waiting for slot
+  } else {
+    bg = "#dcdcdc"; border = "#adadad";  // off
+  }
+  ui->enableTxButton->setStyleSheet(QString(
+    "QPushButton {color: %1;background: %2;border-style: solid;"
+    "border-width: 1px;border-radius: 5px;border-color: %3;"
+    "min-width: 63px;padding: 0px}")
+    .arg(Radio::convert_dark("#000000",m_useDarkStyle))
+    .arg(Radio::convert_dark(bg,m_useDarkStyle))
+    .arg(Radio::convert_dark(border,m_useDarkStyle)));
 }
 
 void MainWindow::enableTx_mode (bool state) {
@@ -3132,10 +3173,16 @@ void MainWindow::on_actionSingleShot_toggled(bool checked)
 void MainWindow::on_actionPassiveMode_toggled(bool checked)
 {
   m_passiveMode=checked;
-  m_passiveTxUserDisabled=false;  // reset user-disabled flag
+  // Only reset the user-disabled flag when triggered by an actual user click —
+  // NOT during settings restore at startup, otherwise a "TX off" intent from
+  // before restart gets clobbered and the bot re-enables TX without permission.
+  if (!m_settingsRestoring) {
+    m_passiveTxUserDisabled=false;
+  }
   setAutoSeqButtonStyle(m_autoseq);
-  if (checked && !m_enableTx) {
-    // Auto-enable TX when passive mode is turned on
+  if (checked && !m_enableTx && !m_settingsRestoring && !m_passiveTxUserDisabled) {
+    // Auto-enable TX when user toggles passive mode ON (not at startup,
+    // and not if user previously disabled TX).
     enableTx_mode(true);
     txwatchdog(false);
   }

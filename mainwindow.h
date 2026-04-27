@@ -130,6 +130,7 @@ public slots:
   void passive_save_cooldowns();
   bool passive_should_skip_for_region(QString const& call, int prio, QString const& continent, QString * reason = nullptr);
   void refresh_wavelog_credentials();
+  void styleEnableTxButton();
   void update_candidate_panel();
   void note_passive_candidate(QString const& call, int prio, int score,
                               QString const& continent, QString const& country);
@@ -625,6 +626,8 @@ private:
   // Last candidate-rejection summary for status-bar display.
   QString m_passiveSkipSummary;
   bool m_passiveTxUserDisabled;  // user manually turned off Enable TX in passive mode
+  bool m_enableTxAtStartup = false;  // persisted m_enableTx state from last run
+  bool m_settingsRestoring = false;  // true during readSettings to suppress side effects in toggled handlers
   bool m_programmaticEnableTx;   // true when enableTx_mode() is calling, not user click
   QProcess * m_webServerProcess;
   bool m_autofilter;
