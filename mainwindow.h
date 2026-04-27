@@ -38,6 +38,7 @@
 #include "decodedtext.h"
 #include "JTDXMessageBox.hpp"
 #include "qsohistory.h"
+#include "StationTracker.h"
 #include "JTDXDateTime.h"
 
 
@@ -98,6 +99,12 @@ public slots:
   void doubleClickOnCall2(bool alt, bool ctrl);
   void readFromStdout();
   void process_Auto();
+  // Passive-mode candidate selection helpers
+  int  passive_score_candidate(QString const& call, int prio, int distance_km, QString const& continent);
+  void passive_apply_cooldown(QString const& call, int duration_minutes_base);
+  void passive_load_cooldowns();
+  void passive_save_cooldowns();
+  bool passive_should_skip_for_region(QString const& call, int prio, QString const& continent, QString * reason = nullptr);
   void p1ReadFromStdout();
   void setXIT(int n, Frequency base = 0u);
   void setFreq4(int rxFreq, int txFreq);
@@ -575,6 +582,13 @@ private:
   bool m_singleshot;
   bool m_passiveMode;
   QHash<QString, qint64> m_passiveCooldown;  // callsign -> cooldown expiry timestamp (ms)
+  QHash<QString, int> m_passiveCooldownStrikes;  // callsign -> consecutive cooldowns (exponential backoff)
+  StationTracker m_stationTracker;
+  // Per-decode-cycle "skip these" set, populated as we reject candidates;
+  // gets reset at the start of each call to passive_select_candidate().
+  QSet<QString> m_passiveCycleSkip;
+  // Last candidate-rejection summary for status-bar display.
+  QString m_passiveSkipSummary;
   bool m_passiveTxUserDisabled;  // user manually turned off Enable TX in passive mode
   bool m_programmaticEnableTx;   // true when enableTx_mode() is calling, not user click
   QProcess * m_webServerProcess;

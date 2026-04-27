@@ -10,6 +10,7 @@
 #include <QString>
 #include <QStringList>
 #include <QHash>
+#include <QSet>
 #include "Radio.hpp"
 #include <QRegularExpression>
 #include <QtMath>
@@ -26,6 +27,14 @@ class QsoHistory
 	void owndata (QString const& mycontinent, QString const& myprefix, QString const& mygrid, bool strictdirCQ);
 	Status status(QString const& callsign, QString &grid);
 	Status autoseq(QString &callsign, QString &grid, QString &rep, int &rx, int &tx, unsigned &time, int &count, int &prio, QString &mode);
+	// Same as autoseq but excludes any base callsign present in skip_set
+	// from the candidate pool. Used to iterate the selection in passive
+	// mode when the first pick fails our extra filters (cooldown, region,
+	// behavior penalty, etc.).
+	Status autoseq_with_skip(QSet<QString> const& skip_set,
+	                          QString &callsign, QString &grid, QString &rep,
+	                          int &rx, int &tx, unsigned &time, int &count,
+	                          int &prio, QString &mode);
 	Status log_data(QString const& callsign, unsigned &time, QString &rrep, QString &srep);
 	unsigned last_heard(QString const& callsign) const; // time in sec-of-day when station was last decoded; 0 if unknown
 	unsigned latest_time() const { return max_r_time; }

@@ -110,11 +110,13 @@ void PSKSelfMonitor::set_heard_continents (QHash<QString, int> const& by_contine
 
 bool PSKSelfMonitor::continent_known_to_hear (QString const& continent) const
 {
-  // Sample-size guard: we need at least 10 spots before we trust the
-  // distribution enough to bias CQ selection. Avoids weird cases where
-  // 1 stray spot from NA makes us avoid all EU CQs.
+  // Sample-size guard plus relevance threshold. The continent must have
+  // ≥3 spots OR ≥20% of total to count as "currently hearing." A single
+  // stray DX spot from 25 minutes ago doesn't qualify (#5/#6).
   if (total_heard_spots_ < 10) return false;
-  return heard_continents_.value (continent.toUpper (), 0) > 0;
+  int n = heard_continents_.value (continent.toUpper (), 0);
+  if (n == 0) return false;
+  return n >= 3 || (n * 5) >= total_heard_spots_;
 }
 
 void PSKSelfMonitor::on_timer ()
@@ -194,6 +196,7 @@ PSKSelfMonitor::Stats PSKSelfMonitor::parse_reply (QByteArray const& body) const
     if (ok) {
       if (fss > s.latest_spot_epoch) s.latest_spot_epoch = fss;
       spot_epochs.append (fss);
+      if (!rxc.isEmpty ()) s.raw_spots.append (qMakePair (rxc, fss));
     }
   }
   s.unique_callsigns = calls.size ();

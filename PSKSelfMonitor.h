@@ -35,6 +35,9 @@ public:
     int tx_heard_count = 0;         // TXs that matched at least one spot
     QHash<QString, int> by_dxcc;    // receiverDXCCCode -> spots
     QStringList receivers;          // unique receiver callsigns (for continent lookup)
+    // Per-spot pairs (call, flowStartSeconds) so consumer can apply recency
+    // weighting when building the continent heatmap (#5/#6).
+    QList<QPair<QString, qint64>> raw_spots;
     QString error;                  // human-readable error if !valid
   };
 

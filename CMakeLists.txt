@@ -246,6 +246,7 @@ set (wsjtx_CXXSRCS
   eqsl.cpp
   WavelogUploader.cpp
   PSKSelfMonitor.cpp
+  StationTracker.cpp
   wsprnet.cpp
   WSPRBandHopping.cpp
   JTDXMessageBox.cpp
