@@ -91,6 +91,7 @@ jobs:
                 -DCMAKE_PREFIX_PATH=/mingw64 \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DWSJT_GENERATE_DOCS=OFF \
+                -DJTDX_SKIP_OMNIRIG=ON \
                 -DCMAKE_INSTALL_PREFIX="$(cygpath -m $(pwd))/install" \
                 ..
 

@@ -271,10 +271,12 @@ if (WIN32)
     killbyname.cpp
     )
 
-  set (wsjt_qt_CXXSRCS
-    ${wsjt_qt_CXXSRCS}
-    OmniRigTransceiver.cpp
-    )
+  if (NOT JTDX_SKIP_OMNIRIG)
+    set (wsjt_qt_CXXSRCS
+      ${wsjt_qt_CXXSRCS}
+      OmniRigTransceiver.cpp
+      )
+  endif ()
 endif (WIN32)
 
 set (wsjt_FSRCS
@@ -677,7 +679,8 @@ endif (WSJT_QDEBUG_IN_RELEASE)
 set_property (SOURCE ${all_C_and_CXXSRCS} APPEND_STRING PROPERTY COMPILE_FLAGS " -include wsjtx_config.h")
 set_property (SOURCE ${all_C_and_CXXSRCS} APPEND PROPERTY OBJECT_DEPENDS wsjtx_config.h)
 
-if (WIN32)
+option (JTDX_SKIP_OMNIRIG "Build without OmniRig support (for CI builds where OmniRig isn't installed)" OFF)
+if (WIN32 AND NOT JTDX_SKIP_OMNIRIG)
   # generate the OmniRig COM interface source
   find_program (DUMPCPP dumpcpp)
   if (DUMPCPP-NOTFOUND)
@@ -690,11 +693,15 @@ if (WIN32)
     )
   string (STRIP "${AXSERVER}" AXSERVER)
   if (NOT AXSERVER)
-    message (FATAL_ERROR "You need to install OmniRig on this computer")
+    message (FATAL_ERROR "You need to install OmniRig on this computer (or pass -DJTDX_SKIP_OMNIRIG=ON)")
   endif (NOT AXSERVER)
   string (REPLACE "\"" "" AXSERVER ${AXSERVER})
   file (TO_CMAKE_PATH ${AXSERVER} AXSERVERSRCS)
-endif (WIN32)
+endif ()
+if (JTDX_SKIP_OMNIRIG)
+  add_definitions (-DJTDX_SKIP_OMNIRIG)
+  message (STATUS "Building without OmniRig support")
+endif ()
 
 
 #
@@ -1030,10 +1037,10 @@ qt5_add_resources (wsjtx_RESOURCES_RCC
 )
 
 # AX COM servers
-if (WIN32)
+if (WIN32 AND NOT JTDX_SKIP_OMNIRIG)
   include (QtAxMacros)
   wrap_ax_server (GENAXSRCS ${AXSERVERSRCS})
-endif (WIN32)
+endif ()
 
 
 #
