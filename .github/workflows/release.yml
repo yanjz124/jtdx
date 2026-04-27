@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: hamlib-prefix
-          key: hamlib-4.5.5-mingw64-v2
+          key: hamlib-4.5.5-mingw64-shared-v3
 
       - name: Build hamlib (not in MSYS2 repos)
         if: steps.cache-hamlib.outputs.cache-hit != 'true'
@@ -69,17 +69,22 @@ jobs:
           tar xzf hamlib.tar.gz
           cd hamlib-4.5.5
           ./configure --prefix=$(cygpath -m $(pwd))/../hamlib-prefix \
-                      --disable-shared --enable-static \
+                      --enable-shared --disable-static \
                       --without-cxx-binding \
                       --disable-winradio \
-                      --disable-dependency-tracking
+                      --disable-dependency-tracking \
+                      LIBS="-lws2_32"
           make -j$(nproc)
           make install
 
       - name: Stage hamlib into mingw64 prefix
         run: |
           cp -r hamlib-prefix/include/hamlib /mingw64/include/
-          cp hamlib-prefix/lib/libhamlib.* /mingw64/lib/
+          cp hamlib-prefix/lib/libhamlib.* /mingw64/lib/ 2>/dev/null || true
+          # Shared build: copy DLL into bin and .dll.a into lib
+          if [ -d hamlib-prefix/bin ]; then
+            cp hamlib-prefix/bin/*.dll /mingw64/bin/ 2>/dev/null || true
+          fi
           if [ -f hamlib-prefix/lib/pkgconfig/hamlib.pc ]; then
             cp hamlib-prefix/lib/pkgconfig/hamlib.pc /mingw64/lib/pkgconfig/
           fi
