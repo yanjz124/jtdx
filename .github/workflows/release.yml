@@ -60,7 +60,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: hamlib-prefix
-          key: hamlib-4.6.2-mingw64-v7
+          key: hamlib-4.6.2-mingw64-perfile-v8
 
       - name: Build hamlib (not in MSYS2 repos)
         if: steps.cache-hamlib.outputs.cache-hit != 'true'
@@ -68,15 +68,19 @@ jobs:
           curl -sSL https://github.com/Hamlib/Hamlib/releases/download/4.6.2/hamlib-4.6.2.tar.gz -o hamlib.tar.gz
           tar xzf hamlib.tar.gz
           cd hamlib-4.6.2
-          # Force winsock2.h inclusion ahead of windows.h for every TU so
-          # all of hamlib's src/*.c files see fd_set/FD_SET/select/etc.
-          # without each one needing manual patches.
+          # Patch network-related src files to include winsock2.h up-front.
+          # Doing this per-file (rather than via global CFLAGS) avoids
+          # conflicts with mmsystem.h in winradio backends (g313-win.c).
+          for f in src/microham.c src/termios.c src/network.c src/iofunc.c; do
+            if [ -f "$f" ] && ! grep -q '<winsock2.h>' "$f"; then
+              sed -i '1i #include <winsock2.h>\n#include <ws2tcpip.h>' "$f"
+            fi
+          done
           ./configure --prefix=$(cygpath -m $(pwd))/../hamlib-prefix \
                       --enable-shared --disable-static \
                       --without-cxx-binding \
                       --disable-winradio \
                       --disable-dependency-tracking \
-                      CFLAGS="-DWIN32_LEAN_AND_MEAN -include winsock2.h" \
                       LIBS="-lws2_32"
           make -j$(nproc)
           make install
