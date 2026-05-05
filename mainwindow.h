@@ -132,6 +132,8 @@ public slots:
   void refresh_wavelog_credentials();
   void styleEnableTxButton();
   void update_candidate_panel();
+  void save_candidates_for_band(QString const& band);
+  void restore_candidates_for_band(QString const& band);
   void note_passive_candidate(QString const& call, int prio, int score,
                               QString const& continent, QString const& country);
   void on_candidateTable_doubleClicked(int row);
@@ -615,6 +617,14 @@ private:
   QHash<QString, qint64> m_passiveCooldown;  // callsign -> cooldown expiry timestamp (ms)
   QHash<QString, int> m_passiveCooldownStrikes;  // callsign -> consecutive cooldowns (exponential backoff)
   QHash<QString, PassiveCandidate> m_passiveCandidates;
+  // Per-band snapshots of candidates + cooldowns. Switching bands saves the
+  // active state and restores the target band's prior state. Keyed by band
+  // name (e.g. "20m"). Decay still applies after restore — stations heard
+  // long enough ago will be removed on the next render.
+  QHash<QString, QHash<QString, PassiveCandidate>> m_perBandCandidates;
+  QHash<QString, QHash<QString, qint64>> m_perBandCooldowns;
+  QHash<QString, QHash<QString, int>> m_perBandCooldownStrikes;
+  QString m_currentBand;  // last-known band for save/restore
   // Live try count for the current call (UI only — process_Auto's autoseq
   // owns the authoritative counter inside QsoHistory).
   int m_currentTryCount = 0;

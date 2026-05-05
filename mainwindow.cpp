@@ -3971,6 +3971,22 @@ void MainWindow::note_passive_candidate(QString const& call, int prio, int score
   }
 }
 
+void MainWindow::save_candidates_for_band(QString const& band)
+{
+  if (band.isEmpty()) return;
+  m_perBandCandidates.insert(band, m_passiveCandidates);
+  m_perBandCooldowns.insert(band, m_passiveCooldown);
+  m_perBandCooldownStrikes.insert(band, m_passiveCooldownStrikes);
+}
+
+void MainWindow::restore_candidates_for_band(QString const& band)
+{
+  if (band.isEmpty()) return;
+  m_passiveCandidates = m_perBandCandidates.value(band);
+  m_passiveCooldown = m_perBandCooldowns.value(band);
+  m_passiveCooldownStrikes = m_perBandCooldownStrikes.value(band);
+}
+
 void MainWindow::update_candidate_panel()
 {
   if (!ui->candidateTable) return;
@@ -3995,14 +4011,19 @@ void MainWindow::update_candidate_panel()
     if (b.avg_snr() > -90) c.snr_avg = b.avg_snr();
   }
   // Add any cooldown entries that aren't in the panel yet so user can manage them.
+  // Skip worked-before-band-mode stations: they're filtered out by
+  // note_passive_candidate and would otherwise flicker (stub added each render,
+  // removed on next decode trigger).
   for (auto it = m_passiveCooldown.constBegin(); it != m_passiveCooldown.constEnd(); ++it) {
     if (!m_passiveCandidates.contains(it.key())) {
+      QString cn;
+      bool b4 = false, b4bm = false;
+      m_logBook.matchCall(it.key(), cn, b4, b4bm, double(m_freqNominal), m_mode);
+      if (b4bm) continue;  // already worked on this band+mode — don't show
       PassiveCandidate stub;
       stub.call = it.key();
       stub.cooldown_until_ms = it.value();
       stub.last_heard_ms = now;  // anchor decay
-      QString cn;
-      m_logBook.getDXCC(it.key(), cn);
       QStringList parts = cn.split(',');
       stub.continent = parts.value(0).trimmed();
       stub.country = cn;
@@ -5812,6 +5833,15 @@ void MainWindow::guiUpdate()
   if(nsec != m_sec0) {
     // Refresh candidate panel cooldown countdowns / decay every second.
     if (m_passiveMode) update_candidate_panel();
+    // Periodically prune StationTracker (every ~30s) to bound memory growth
+    // over long-running sessions. Drop entries we haven't heard from in 2h.
+    {
+      static int prune_tick = 0;
+      if (++prune_tick >= 30) {
+        prune_tick = 0;
+        m_stationTracker.prune(m_jtdxtime->currentMSecsSinceEpoch2(), 120);
+      }
+    }
     // Sync PSK self-monitor enable state and target to current config / band / call.
     if (m_pskSelfMonitor) {
       bool want = m_config.psk_self_monitor() && !m_baseCall.isEmpty();
@@ -7854,6 +7884,17 @@ void MainWindow::band_changed (Frequency f)
           ui->decodedTextBrowser2->clear();
           cleared=true;
       }
+    }
+    // Per-band candidate save/restore: each band has its own list of
+    // candidates and cooldowns. On band change, save the active state to
+    // the old band's slot and load whatever was saved for the new band
+    // (empty if first visit). Existing stations that have decayed past
+    // the 5-min mark are pruned by update_candidate_panel.
+    if (oldband != newband && !oldband.isEmpty()) {
+      save_candidates_for_band(oldband);
+      restore_candidates_for_band(newband);
+      m_currentBand = newband;
+      update_candidate_panel();
     }
 //    m_lastBand.clear ();
     m_bandEdited = false;
