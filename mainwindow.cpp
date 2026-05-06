@@ -1604,7 +1604,7 @@ void MainWindow::readSettings()
   m_colorTxMsgButtons=m_settings->value("ColorTxMessageButtons",false).toBool();
   ui->actionColor_Tx_message_buttons->setChecked(m_colorTxMsgButtons);
 
-  m_callToClipboard=m_settings->value("CallsignToClipboard",true).toBool();
+  m_callToClipboard=m_settings->value("CallsignToClipboard",false).toBool();
   ui->actionCallsign_to_clipboard->setChecked(m_callToClipboard);
 
   m_crossbandOptionEnabled=m_settings->value("Crossband160mJA",false).toBool();
@@ -3923,19 +3923,6 @@ void MainWindow::note_passive_candidate(QString const& call, int prio, int score
 {
   QString base = Radio::base_callsign(call);
   if (base.length() < 3) return;
-  // Skip stations already worked on this band+mode — they shouldn't
-  // appear in the "intending to work" panel at all (#worked-before).
-  // We still allow manually-pinned entries (user override).
-  {
-    QString cn3;
-    bool b4 = false, b4bm = false;
-    m_logBook.matchCall(call, cn3, b4, b4bm, double(m_freqNominal), m_mode);
-    bool pinned = m_passiveCandidates.contains(base) && m_passiveCandidates[base].manual_pin;
-    if (b4bm && !pinned) {
-      m_passiveCandidates.remove(base);
-      return;
-    }
-  }
   PassiveCandidate &c = m_passiveCandidates[base];
   if (c.call.isEmpty()) c.call = base;
   c.prio = prio;
@@ -4042,8 +4029,23 @@ void MainWindow::update_candidate_panel()
   }
   for (QString const& k : expired) m_passiveCandidates.remove(k);
 
-  // Build sorted list. Currently-calling first, then manual pins, then by score desc.
-  QList<PassiveCandidate> rows = m_passiveCandidates.values();
+  // Build sorted, render-filtered list. Currently-calling first, then manual
+  // pins, then by score desc. Skip stations we've already worked on this
+  // band+mode unless manually pinned (user override). Skipping at render
+  // time (rather than active removal) avoids the add/remove flicker that
+  // happened when one path tries to add the candidate and another removes it.
+  QList<PassiveCandidate> rows;
+  rows.reserve(m_passiveCandidates.size());
+  for (auto it = m_passiveCandidates.constBegin(); it != m_passiveCandidates.constEnd(); ++it) {
+    PassiveCandidate const& c = it.value();
+    if (!c.manual_pin) {
+      QString cn4;
+      bool b4 = false, b4bm = false;
+      m_logBook.matchCall(c.call, cn4, b4, b4bm, double(m_freqNominal), m_mode);
+      if (b4bm) continue;
+    }
+    rows.append(c);
+  }
   std::sort(rows.begin(), rows.end(), [](PassiveCandidate const& a, PassiveCandidate const& b) {
     if (a.currently_calling != b.currently_calling) return a.currently_calling;
     if (a.manual_pin != b.manual_pin) return a.manual_pin;
