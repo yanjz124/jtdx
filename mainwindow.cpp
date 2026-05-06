@@ -4387,13 +4387,54 @@ void MainWindow::process_Auto()
         bool regionGone = (m_passiveMode && count >= 2 && prio <= 1
                            && passive_should_skip_for_region(hisCall, prio, contAct, nullptr));
         if (busy) {
-          // Don't increment retries — wait for them to finish.
-          if (!busyPartner.isEmpty())
-            update_autoseq_status(tr("%1 working %2 [hold]").arg(hisCall).arg(busyPartner));
-          else
-            update_autoseq_status(tr("%1 busy with others [hold]").arg(hisCall));
-          // Roll back the retry count one notch since this attempt was wasted.
-          count = m_qsoHistory.reset_count(hisCall, m_status);
+          // Target is mid-QSO with someone else. Rather than waste the next
+          // TX cycle holding, check if there's another free candidate we
+          // could call this cycle. If yes, clear DX and fall through to the
+          // CQ-search branch which will pick the next best candidate.
+          // The busy station stays in m_passiveCandidates and becomes
+          // eligible again next cycle once they're idle.
+          bool foundFree = false;
+          if (m_passiveMode) {
+            qint64 nowMs = m_jtdxtime->currentMSecsSinceEpoch2();
+            for (auto it = m_passiveCandidates.constBegin();
+                 it != m_passiveCandidates.constEnd(); ++it) {
+              QString const& other = it.key();
+              if (other == Radio::base_callsign(hisCall)) continue;
+              if (m_passiveCooldown.contains(other)) continue;
+              if (m_stationTracker.is_busy_now(other, nowMs)) continue;
+              // Quick worked-before check
+              QString cn5;
+              bool b4 = false, b4bm = false;
+              m_logBook.matchCall(other, cn5, b4, b4bm,
+                                   double(m_freqNominal), m_mode);
+              if (b4bm) continue;
+              foundFree = true;
+              break;
+            }
+          }
+          if (foundFree) {
+            QString partnerStr = busyPartner.isEmpty() ? tr("(other)") : busyPartner;
+            update_autoseq_status(tr("%1 working %2 — switching to next candidate")
+                                  .arg(hisCall).arg(partnerStr));
+            writeToALLTXT(QString("Passive mode: %1 busy with %2 — switching to next free candidate")
+                          .arg(hisCall).arg(partnerStr));
+            // Roll back retry count (this attempt didn't happen)
+            count = m_qsoHistory.reset_count(hisCall, m_status);
+            // Don't cooldown — they're just busy, not unresponsive.
+            // Clear DX so CQ-search runs.
+            clearDX(QString(" cleared, target busy — switching"));
+            hisCall = m_hisCall;  // now empty
+            grid = m_hisGrid;
+            m_status = QsoHistory::NONE;
+            // Fall through; the CQ-search block below will pick a new target.
+          } else {
+            // No free alternates — hold as before.
+            if (!busyPartner.isEmpty())
+              update_autoseq_status(tr("%1 working %2 [hold]").arg(hisCall).arg(busyPartner));
+            else
+              update_autoseq_status(tr("%1 busy with others [hold]").arg(hisCall));
+            count = m_qsoHistory.reset_count(hisCall, m_status);
+          }
         } else if (m_passiveMode && remaining > 0 && !regionGone) {
           QString etaStr = (etaSec >= 60) ? QString("~%1m").arg(etaSec / 60)
                                            : QString("~%1s").arg(etaSec);
