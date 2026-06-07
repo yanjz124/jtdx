@@ -3930,10 +3930,16 @@ void MainWindow::note_passive_candidate(QString const& call, int prio, int score
   if (!continent.isEmpty()) c.continent = continent;
   if (!country.isEmpty()) c.country = country;
   // Pull live data from StationTracker for snr / grid / last_heard.
+  // Conditional updates: never clobber a previously-good value with the
+  // empty-default Behavior that get() returns for unknown calls. If
+  // StationTracker doesn't have this call (e.g. just pruned, or first-CQ
+  // race), keep whatever we already had. Prevents the flicker where the
+  // row briefly shows "?" / "0s" because the tracker temporarily lost data.
   StationTracker::Behavior const& b = m_stationTracker.get(base);
-  c.snr_best = b.best_snr;
-  c.snr_avg = b.avg_snr();
-  c.last_heard_ms = b.last_heard_ms;
+  if (b.best_snr > -90) c.snr_best = b.best_snr;
+  int avg = b.avg_snr();
+  if (avg > -90) c.snr_avg = avg;
+  if (b.last_heard_ms > 0) c.last_heard_ms = b.last_heard_ms;
   if (!b.grid.isEmpty()) c.grid = b.grid;
   c.busy_with_other = !b.currently_in_qso_with.isEmpty()
                       && b.currently_in_qso_with != Radio::base_callsign(m_baseCall);
