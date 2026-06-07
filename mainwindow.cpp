@@ -4052,10 +4052,15 @@ void MainWindow::update_candidate_panel()
     }
     rows.append(c);
   }
+  // Stable, deterministic sort: any two candidates with equal score must
+  // not swap positions each render — otherwise rows visibly flash as
+  // their position bounces. Tie-break by call-letters then last-heard.
   std::sort(rows.begin(), rows.end(), [](PassiveCandidate const& a, PassiveCandidate const& b) {
     if (a.currently_calling != b.currently_calling) return a.currently_calling;
     if (a.manual_pin != b.manual_pin) return a.manual_pin;
-    return a.score > b.score;
+    if (a.score != b.score) return a.score > b.score;
+    if (a.last_heard_ms != b.last_heard_ms) return a.last_heard_ms > b.last_heard_ms;
+    return a.call < b.call;
   });
 
   ui->candidateTable->setUpdatesEnabled(false);
